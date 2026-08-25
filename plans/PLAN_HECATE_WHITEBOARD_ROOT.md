@@ -12,17 +12,18 @@ chalk-white ink, one amber accent), host/peer status made visible
 rather than hidden.
 
 **2026-08-25, later same day, after a computer crash broke the session:**
-picked back up per the memory this plan doc left behind. Three more
+picked back up per the memory this plan doc left behind. Five more
 things landed: `HecateWhiteboardWeb.ErrorView` (any 404 was crashing to
 a raw 500 -- Phoenix derives that view by naming convention when
 `render_errors` isn't configured, and it never existed), the
 stroke_id-keyed dedup this doc already called out as the obvious fix
-for the catchup-replay gap, and `join_board` itself (mesh-level
-discovery + snapshot fetch, view-only) — **live-verified against
-beam01/beam02**, not just unit-tested. See "join_board — DONE
-2026-08-25 (discovery + snapshot, view-only)" below for the real shape
-of what shipped versus what this doc originally sketched, and the
-verification section for the actual fleet test.
+for the catchup-replay gap, `join_board` itself (mesh-level discovery +
+snapshot fetch, view-only), a board picker (`/boards`), and -- found
+while live-verifying the picker deploy -- **a real bug in evoq itself**,
+fixed at the source and shipped as evoq 1.23.1. See "join_board — DONE
+2026-08-25", "Board picker — DONE 2026-08-25", and "evoq catch-up bug —
+FOUND AND FIXED 2026-08-25" below for the real shape of what shipped,
+and each section's own verification notes for the actual fleet tests.
 
 **Previously (walking skeleton), for reference:** Repo:
 `github.com/hecate-services/hecate-whiteboard` (public). CI green
@@ -545,6 +546,78 @@ the correct title from a board it never locally created, with
 `data-can-draw="false"` (view-only, correctly not the authority),
 while the SAME board_id on beam01 itself still shows
 `data-can-draw="true"`.
+
+### Board picker — DONE 2026-08-25
+
+User asked "is there a way to select a board?" -- there wasn't (URL-only,
+no create UX). `QueryBoards.ListHostedBoards` reads `project_boards`'
+`boards` table, filtered to hosted+not-archived (same bits `can_draw?`
+already reads) -- deliberately does NOT also list boards this node has
+merely joined/cached via mesh, since a stale one-off join snapshot in
+that list would mislead more than help. `HecateWhiteboardWeb.BoardsLive`
+at `/boards` renders them as cards plus a "new board" form that mints +
+hosts a fresh board through the ALREADY-EXISTING `initiate_board`/
+`host_board` desks (`MaybeInitiateBoard.dispatch/1` already minted fresh
+ids; it just had no UI wired to it). The main board view's brand/logo now
+links to `/boards`.
+
+Found and fixed a real bug before shipping: the `boards` table's stored
+row doesn't carry `board_id` in its VALUE (only the ETS key does -- same
+shape `GetBoardSnapshotById` already accounts for). The first cut of
+`ListHostedBoards` discarded the key and crashed `KeyError` the instant a
+real board existed. The test written first didn't catch it either (it
+also put `board_id` in the value, matching the bug's wrong assumption
+rather than the real shape) -- rewritten to match reality, confirmed red
+without the fix, green with it before trusting the green.
+
+Verified against a local boot: empty state renders, a board created
+through the real dispatch chain shows up on `/boards`, and the topbar
+link round-trips.
+
+### evoq catch-up bug — FOUND AND FIXED 2026-08-25
+
+Deploying the board picker surfaced something much bigger than the
+picker itself. beam01 restarted for the deploy and came back showing "No
+boards hosted here yet" / 0 strokes on a board that had strokes drawn on
+it earlier the SAME session. beam02 (hadn't restarted since the
+`join_board` deploy) still showed 2 strokes on the same-shaped board --
+clean before/after proof this was restart-triggered, not a picker bug.
+
+Root cause, confirmed by reading `evoq_store_subscription.erl` directly:
+evoq's one-time catch-up replay runs synchronously as part of
+`hecate_om:boot/1`, before ANY sibling umbrella app -- the one that
+actually owns the projection handlers -- has booted. It scans real
+history with **zero handlers registered**, and the module's own "new
+event type registered ... already covered by `$all`" branch was a no-op
+that never backfilled what catch-up had already scanned-and-discarded.
+Not hecate-whiteboard-specific: this hits any evoq consumer shaped like
+this workspace's own CMD/PRJ/QRY vertical-slice convention (separate
+umbrella apps booting in sequence), so it likely also silently affected
+other real evoq consumers in this workspace on any restart with real
+accumulated history, before the fix.
+
+Asked the user how to handle it given the size of the detour (fix now vs.
+log-and-stop) -- user chose fix now. Fixed at the source in the real
+`reckon-db-org/evoq` repo: `evoq_store_subscription`'s
+`{new_event_type, EventType}` handler now backfills that one type's
+history instead of doing nothing, filtered so already-covered handlers
+see no redundant delivery, reusing the subscription's own running `seq`
+counter so no version collisions. Shipped as **evoq 1.23.1** (patch, no
+public API change) -- 110 eunit tests (4 new) green, dialyzer/elvis/ex_doc
+all clean, no new findings. User published to hex.pm.
+
+**Live-verified the fix, not just the mechanism.** Triggered a manual
+hecate-whiteboard rebuild (`gh workflow run build-push.yml` -- no code
+change needed, `{:evoq, "~> 1.23"}` already covered 1.23.1 and this repo
+never commits `mix.lock`), confirmed the build log resolved `evoq
+1.23.1`, watched watchtower roll it to both nodes. beam01's restart is
+the textbook confirmation: boot log shows the ORIGINAL failure signature
+(`handlers=0` for all 14 events during catch-up) immediately followed by
+the fix firing per type (`Backfill board_store/stroke_drawn_v1: matched
+3 of 14 scanned`, etc., seq advancing cleanly 0→3→6→13→14) -- read model
+came back fully intact (3 strokes, both boards) instead of empty. beam02
+confirmed unaffected too (2 strokes, exactly matching pre-restart).
+`join_board` regression-checked working afterward.
 
 ---
 

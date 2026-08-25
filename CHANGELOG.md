@@ -36,6 +36,12 @@ Versioning: [SemVer](https://semver.org/).
   (read-only) from beam02 cold, via a real mesh query/reply round trip.
   See the plan doc's "`join_board` — DONE 2026-08-25" section for the
   full design.
+- Board picker: `/boards` lists every board this node hosts
+  (`QueryBoards.ListHostedBoards`, deliberately excluding boards this
+  node has only joined/cached, to avoid surfacing a stale one-off
+  snapshot) plus a "new board" form that mints and hosts a fresh board
+  through the already-existing `initiate_board`/`host_board` desks. The
+  main board view's brand/logo now links to `/boards`.
 
 ### Fixed
 
@@ -50,3 +56,18 @@ Versioning: [SemVer](https://semver.org/).
   re-published) every historical stroke. `ProjectBoards.Store.new_stroke?/1`
   gates both the local projection and `BoardMeshSubscriber` with an
   atomic stroke_id-keyed check-and-set.
+- `boards` table rows crashed `ListHostedBoards` with a `KeyError`
+  the moment a real board existed: the stored row doesn't carry
+  `board_id` in its value, only as the ETS key, same shape
+  `GetBoardSnapshotById` already accounted for.
+- **A real bug in `evoq` itself**, not this repo: a handler registering
+  after `evoq_store_subscription`'s one-time catch-up scan already ran
+  never received any of the store's pre-existing history for its event
+  type, silently wiping the read model on every restart with real
+  accumulated history (the underlying event store was untouched — a
+  projection gap, not data loss). Found live via a beam01/beam02
+  stroke-count mismatch after a restart. Fixed at the source in
+  `reckon-db-org/evoq` and shipped as evoq 1.23.1; this repo's existing
+  `{:evoq, "~> 1.23"}` picked it up with no dependency change needed.
+  See the plan doc's "evoq catch-up bug — FOUND AND FIXED 2026-08-25"
+  section for the full diagnosis and live-fleet re-verification.
