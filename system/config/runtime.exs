@@ -40,3 +40,19 @@ config :evoq,
   subscription_adapter: :reckon_evoq_adapter,
   snapshot_store_adapter: :reckon_evoq_adapter,
   store_id: :board_store
+
+http_port = String.to_integer(System.get_env("HECATE_HTTP_PORT", "4000"))
+
+config :hecate_whiteboard_web, HecateWhiteboardWeb.Endpoint,
+  http: [ip: {0, 0, 0, 0}, port: http_port],
+  server: true,
+  # Dev-only fixed default -- this walking skeleton has no user accounts
+  # or CSRF-protected forms, only the LiveView socket handshake needs it
+  # signed. Prod sets SECRET_KEY_BASE for real; the value below is not
+  # sensitive on its own (nothing it protects exists yet), just needs to
+  # be present and 64+ bytes for Phoenix to accept it.
+  secret_key_base:
+    System.get_env(
+      "SECRET_KEY_BASE",
+      "hwbdev0000000000000000000000000000000000000000000000000000000000000000000000"
+    )

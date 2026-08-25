@@ -1,0 +1,246 @@
+/* hecate-whiteboard -- a chalkboard, not a SaaS dashboard. Slate you write
+   on, chalk-white ink, one warm amber accent for "this is live." The host
+   status readout is deliberate: most whiteboard tools hide their server,
+   this one has none to hide, so it says so. */
+
+:root {
+  --slate: #262a27;
+  --slate-deep: #1b1e1c;
+  --slate-line: rgba(242, 239, 230, 0.1);
+  --chalk: #f2efe6;
+  --chalk-dim: rgba(242, 239, 230, 0.5);
+  --amber: #d89b4a;
+  --amber-soft: rgba(216, 155, 74, 0.16);
+  --wait: #6b6f6c;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--slate);
+  color: var(--chalk);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* ---- top bar ---- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  height: 48px;
+  flex-shrink: 0;
+  padding: 0 1rem;
+  background: var(--slate-deep);
+  border-bottom: 1px solid var(--slate-line);
+}
+
+.brand {
+  font-weight: 600;
+  font-size: 0.9rem;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.brand-dim {
+  color: var(--chalk-dim);
+  font-weight: 400;
+}
+
+.board-title {
+  flex: 1;
+  color: var(--chalk-dim);
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--chalk-dim);
+  white-space: nowrap;
+}
+
+.status-sep {
+  opacity: 0.5;
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--wait);
+  flex-shrink: 0;
+}
+
+.dot-live {
+  background: var(--amber);
+  box-shadow: 0 0 0 3px var(--amber-soft);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px var(--amber-soft);
+  }
+  50% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot-live {
+    animation: none;
+  }
+}
+
+/* ---- canvas ---- */
+
+.canvas-wrap {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  background: var(--slate);
+  background-image: radial-gradient(circle at 1px 1px, var(--slate-line) 1px, transparent 0);
+  background-size: 28px 28px;
+  cursor: crosshair;
+}
+
+.layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  color: var(--chalk-dim);
+  font-size: 1rem;
+  font-style: italic;
+}
+
+/* ---- toolbar ---- */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  height: 56px;
+  flex-shrink: 0;
+  background: var(--slate-deep);
+  border-top: 1px solid var(--slate-line);
+}
+
+.tool-group {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--chalk-dim);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.tool:hover {
+  color: var(--chalk);
+  background: rgba(242, 239, 230, 0.06);
+}
+
+.tool-active {
+  color: var(--slate-deep);
+  background: var(--amber);
+}
+
+.tool-active:hover {
+  background: var(--amber);
+  color: var(--slate-deep);
+}
+
+.swatches {
+  display: flex;
+  gap: 0.55rem;
+  padding-left: 1.25rem;
+  border-left: 1px solid var(--slate-line);
+}
+
+.swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  background: var(--sw);
+  box-shadow: 0 0 0 2px var(--slate-deep), 0 0 0 3px transparent;
+  transition: box-shadow 0.15s ease;
+}
+
+.swatch:hover {
+  box-shadow: 0 0 0 2px var(--slate-deep), 0 0 0 3px var(--chalk-dim);
+}
+
+.swatch-active {
+  box-shadow: 0 0 0 2px var(--slate-deep), 0 0 0 3px var(--amber);
+}
+
+/* ---- responsive ---- */
+
+@media (max-width: 520px) {
+  .board-title {
+    display: none;
+  }
+
+  .status-text .mono {
+    display: none;
+  }
+}

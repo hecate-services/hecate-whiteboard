@@ -7,7 +7,9 @@ defmodule GuideBoardLifecycle.BoardStatus do
 
   @initiated 1
   @archived 2
+  @hosted 4
 
   def initiated, do: @initiated
   def archived, do: @archived
+  def hosted, do: @hosted
 end

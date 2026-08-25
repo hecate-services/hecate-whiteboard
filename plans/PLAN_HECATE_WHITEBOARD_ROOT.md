@@ -164,6 +164,23 @@ tube-specific:
   (`project_boards`), never read the aggregate directly — keeps write and
   read sides decoupled per this workspace's stated CQRS principle, and
   matches hecate-tube's actual proven shape (`project_tube_store`).
+- **`evoq_event_handler` is the real, verified projection/PM behaviour —
+  `evoq_projection`'s documented `interested_in/init/project` shape
+  (`init/1 -> {ok, State, ReadModel}`) was never actually exercised
+  anywhere, including in hecate-tube.** Confirmed 2026-08-25 by reading
+  `evoq_event_handler.erl` and `evoq_event_router.erl` directly after a
+  boot crash (`FunctionClauseError` in `handle_init/4`). The real
+  contract: `interested_in/0 -> [binary()]`, `init(Config) -> {ok, State}
+  | {error, Reason}` (2-tuple, no ReadModel threaded through — just call
+  your ETS table's known name directly inside the handler), and
+  `handle_event(EventType, Event, Metadata, State) -> {ok, NewState} |
+  {error, Reason}` — note `EventType` arrives as its own argument, but
+  `Event` is still the full wrapped store record (`event_type, data,
+  stream_id, version, ...`), confirmed via
+  `evoq_event_router:route_event_internal/3` reading
+  `maps:get(event_type, Event)` off the SAME map it later passes whole
+  into `handle_event/4` — so the `data` unwrap is still required, just
+  one argument later than the `evoq_projection` docs implied.
 
 ---
 

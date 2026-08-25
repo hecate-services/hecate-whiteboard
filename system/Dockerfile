@@ -41,12 +41,24 @@ ENV MIX_ENV=prod
 COPY mix.exs ./
 COPY apps/hecate_whiteboard/mix.exs ./apps/hecate_whiteboard/
 COPY apps/guide_board_lifecycle/mix.exs ./apps/guide_board_lifecycle/
+COPY apps/project_boards/mix.exs ./apps/project_boards/
+COPY apps/query_boards/mix.exs ./apps/query_boards/
+COPY apps/hecate_whiteboard_web/mix.exs ./apps/hecate_whiteboard_web/
 RUN mix deps.get --only prod
 RUN mix deps.compile
 
 COPY config ./config
 COPY apps ./apps
 RUN mix compile
+
+# Bundles app.js (phoenix + phoenix_live_view resolved via NODE_PATH
+# against deps/, see config/config.exs) and app.css into
+# apps/hecate_whiteboard_web/priv/static/assets/, which the release then
+# ships as static files -- source isn't committed (see that app's
+# .gitignore), same reasoning as not committing mix.lock.
+RUN mix esbuild.install --if-missing
+RUN mix esbuild hecate_whiteboard_web
+RUN mix esbuild hecate_whiteboard_web_css
 
 # mix release assembles [:erts, :app, ...] via parallel Tasks, and the
 # [:erts] copy (cp_r + rewrite bin/erl + chmod) races on the build
@@ -81,8 +93,9 @@ WORKDIR /app
 # service with no untrusted input to sandbox against.
 COPY --from=build /app/_build/prod/rel/hecate_whiteboard ./
 ENV HECATE_HEALTH_PORT=8490
+ENV HECATE_HTTP_PORT=4000
 
-EXPOSE 8490
+EXPOSE 8490 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -fsS "http://127.0.0.1:${HECATE_HEALTH_PORT}/health" || exit 1
 

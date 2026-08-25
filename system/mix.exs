@@ -14,7 +14,21 @@ defmodule HecateWhiteboardUmbrella.MixProject do
   defp releases do
     [
       hecate_whiteboard: [
-        applications: [hecate_whiteboard: :permanent, guide_board_lifecycle: :permanent]
+        # Every app in the umbrella must be listed explicitly here --
+        # `mix release` does NOT auto-include the rest just because
+        # they're present under apps/. Adding a new umbrella app and
+        # forgetting to add it here compiles fine and boots fine (`mix
+        # phx.server`/`mix run` don't have this restriction), then
+        # silently excludes it from the actual release with no error --
+        # found the hard way when hecate_whiteboard_web's Endpoint never
+        # started inside the built container, despite working locally.
+        applications: [
+          hecate_whiteboard: :permanent,
+          guide_board_lifecycle: :permanent,
+          project_boards: :permanent,
+          query_boards: :permanent,
+          hecate_whiteboard_web: :permanent
+        ]
       ]
     ]
   end

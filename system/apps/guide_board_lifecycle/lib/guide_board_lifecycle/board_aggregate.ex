@@ -7,6 +7,8 @@ defmodule GuideBoardLifecycle.BoardAggregate do
   alias GuideBoardLifecycle.ArchiveBoard.MaybeArchiveBoard
   alias GuideBoardLifecycle.BoardState
   alias GuideBoardLifecycle.BoardStatus
+  alias GuideBoardLifecycle.DrawStroke.MaybeDrawStroke
+  alias GuideBoardLifecycle.HostBoard.MaybeHostBoard
   alias GuideBoardLifecycle.InitiateBoard.MaybeInitiateBoard
 
   @impl true
@@ -24,7 +26,7 @@ defmodule GuideBoardLifecycle.BoardAggregate do
   end
 
   defp do_execute(:initiate_board, status, payload) do
-    if Bitwise.band(status, BoardStatus.initiated()) == 0 do
+    if :evoq_bit_flags.has_not(status, BoardStatus.initiated()) do
       MaybeInitiateBoard.handle_from_map(payload)
     else
       {:error, :already_initiated}
@@ -33,9 +35,25 @@ defmodule GuideBoardLifecycle.BoardAggregate do
 
   defp do_execute(:archive_board, status, payload) do
     cond do
-      Bitwise.band(status, BoardStatus.initiated()) == 0 -> {:error, :not_initiated}
-      Bitwise.band(status, BoardStatus.archived()) != 0 -> {:error, :already_archived}
+      :evoq_bit_flags.has_not(status, BoardStatus.initiated()) -> {:error, :not_initiated}
+      :evoq_bit_flags.has(status, BoardStatus.archived()) -> {:error, :already_archived}
       true -> MaybeArchiveBoard.handle_from_map(payload)
+    end
+  end
+
+  defp do_execute(:host_board, status, payload) do
+    cond do
+      :evoq_bit_flags.has_not(status, BoardStatus.initiated()) -> {:error, :not_initiated}
+      :evoq_bit_flags.has(status, BoardStatus.archived()) -> {:error, :archived}
+      true -> MaybeHostBoard.handle_from_map(payload)
+    end
+  end
+
+  defp do_execute(:draw_stroke, status, payload) do
+    cond do
+      :evoq_bit_flags.has_not(status, BoardStatus.hosted()) -> {:error, :not_hosted}
+      :evoq_bit_flags.has(status, BoardStatus.archived()) -> {:error, :archived}
+      true -> MaybeDrawStroke.handle_from_map(payload)
     end
   end
 

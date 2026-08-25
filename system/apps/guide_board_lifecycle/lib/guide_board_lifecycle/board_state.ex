@@ -18,14 +18,20 @@ defmodule GuideBoardLifecycle.BoardState do
       state
       | owner: field(:owner, event),
         title: field(:title, event),
-        status: Bitwise.bor(state.status, BoardStatus.initiated())
+        status: :evoq_bit_flags.set(state.status, BoardStatus.initiated())
     }
   end
 
-  defp do_apply("board_archived_v1", state, _event) do
-    %__MODULE__{state | status: Bitwise.bor(state.status, BoardStatus.archived())}
+  defp do_apply("board_hosted_v1", state, _event) do
+    %__MODULE__{state | status: :evoq_bit_flags.set(state.status, BoardStatus.hosted())}
   end
 
+  defp do_apply("board_archived_v1", state, _event) do
+    %__MODULE__{state | status: :evoq_bit_flags.set(state.status, BoardStatus.archived())}
+  end
+
+  # stroke_drawn_v1 and anything else: doesn't affect status/business-rule
+  # state. Stroke content is a read-side concern -- see project_boards.
   defp do_apply(_other, state, _event), do: state
 
   @impl true
