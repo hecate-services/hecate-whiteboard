@@ -9,9 +9,18 @@ canvas (`hecate_whiteboard_web`), and basic mesh replication
 (`StrokeDrawnV1ToMesh` + `BoardMeshSubscriber`) are all built, tested,
 and deployed. Visual design: a chalk-on-slate canvas (warm charcoal,
 chalk-white ink, one amber accent), host/peer status made visible
-rather than hidden. See "Basic mesh replication" and "Suggested build
-order" below for what was found getting here and what's next
-(`join_board` proper, presence, dedup).
+rather than hidden.
+
+**2026-08-25, later same day, after a computer crash broke the session:**
+picked back up per the memory this plan doc left behind. Three more
+things landed: `HecateWhiteboardWeb.ErrorView` (any 404 was crashing to
+a raw 500 -- Phoenix derives that view by naming convention when
+`render_errors` isn't configured, and it never existed), the
+stroke_id-keyed dedup this doc already called out as the obvious fix
+for the catchup-replay gap, and `join_board` itself (mesh-level
+discovery + snapshot fetch, view-only). See "join_board — DONE
+2026-08-25 (discovery + snapshot, view-only)" below for the real shape
+of what shipped versus what this doc originally sketched.
 
 **Previously (walking skeleton), for reference:** Repo:
 `github.com/hecate-services/hecate-whiteboard` (public). CI green
@@ -434,23 +443,105 @@ see the risk-verification note below):
    `BoardMeshSubscriber`'s pre-existing "no dedup" note: a
    stroke_id-keyed dedup on the receiving side would fix both).
 
-### Known simplifications carried from the walking-skeleton phase, not yet revisited
+### Known simplifications carried from the walking-skeleton phase
 
 - `check_origin: false` on the Endpoint (no fronting domain yet).
 - `SECRET_KEY_BASE` falls back to a fixed, publicly-committed dev value
   (see `config/runtime.exs`) — nothing of real value depends on it yet
   (no accounts, no forms), but this needs a real provisioned secret
   before this is anything more than a demo.
-- The default board is a single fixed id (`@default_board_id` in
-  `board_live.ex`) — no board creation/picker UX. Fine for proving
-  drawing; will need real board identity once `join_board` lets a second
-  peer target a SPECIFIC board rather than "whatever this host is
-  showing."
+- The default board (visited at `/`) is still a single fixed id
+  (`@default_board_id` in `board_live.ex`) — no board creation/picker
+  UX. `join_board` (below) now lets a second peer target a SPECIFIC
+  *other* board_id via `/board/:board_id`, but there's still no UI to
+  mint a fresh one or discover what board_ids exist.
+
+### `join_board` — DONE 2026-08-25 (discovery + snapshot, view-only)
+
+Not the single-authority join this doc originally sketched under
+"Late-join snapshot, not full replay" (client subscribes, buffers,
+snapshot carries `as_of_version`, client filters the buffer) — the
+default board already broke that model by being symmetric gossip
+between two simultaneous "hosts" of the same id (see "Basic mesh
+replication" above), so `join_board` needed a discovery step that
+design never had to solve: **how does a joining peer learn WHICH host
+serves a given board_id at all?** Asked the user rather than guessing
+at a flagship-app UX decision; picked **mesh-level discovery** over an
+out-of-band host link.
+
+**Shape that shipped**, all in `query_boards`:
+
+- `QueryBoards.GetBoardSnapshotByIdOverMesh` (client): publishes a
+  `board_snapshot_query_v1` fact naming a fresh per-call reply topic,
+  subscribed to *before* publishing (so a fast responder can't answer
+  before anyone's listening — same subscribe-first principle this doc
+  always had, just applied to the query round trip instead of a stroke
+  buffer). One round trip, not "discover a host, then RPC it" — the
+  reply already carries the full snapshot.
+- `QueryBoards.AnswerBoardSnapshotQueries` (host): permanently
+  subscribed to that same topic on every node. Answers only if
+  `GetBoardSnapshotById` finds a *local* `boards` row (a pure
+  mesh-replica peer never gets one — `BoardMeshSubscriber` only ever
+  writes into `board_shapes`, never `boards`, so the existing read
+  model shape already tells "I host this" from "I've just seen its
+  strokes go by" apart, no new flag needed) AND that row's
+  hosted+not-archived bits say so (the exact same bits `BoardLive`
+  already reads for `can_draw?`).
+- Both directions go through macula's *supervised* pairs
+  (`macula_publisher`/`macula_subscriber` via `QueryBoards.MeshPublisher`
+  / `QueryBoards.OneShotMeshReply`), never a raw `macula:publish/4` or
+  `macula:subscribe/5` call — told directly by the user mid-session, not
+  a preference this doc had recorded before.
+- A successful reply is materialized into `project_boards`' own ETS
+  tables through the same `Store.new_stroke?/1` dedup gate the two
+  existing writers use, with the **hosted bit deliberately cleared** —
+  this node isn't the aggregate authority for a board it joined, so
+  `BoardLive`'s existing `can_draw? = hosted? and not archived?` makes a
+  joined board correctly read-only with zero template changes.
+- `as_of_version` is real now (`GetBoardSnapshotById`'s third field,
+  backed by `Store.note_stroke_version/2`, fed from the wrapped event's
+  own top-level `version` — see "Event shape on the wire" above) but
+  isn't consumed by any buffering logic yet, because there's no
+  buffering logic left to consume it: `BoardMeshSubscriber` is a single
+  always-on global subscriber (not spun up per-join), so it's *already*
+  passively dedup-applying every board's live strokes the instant they
+  hit the mesh, whether or not a local LiveView is watching that
+  board_id yet. Combined with the snapshot materializing through the
+  identical dedup gate, whichever arrives first (a live broadcast vs.
+  the snapshot reply) wins and the other is a no-op — the race
+  `as_of_version` was designed to resolve is already resolved by
+  construction. It's carried on the wire and stored per board in case a
+  future increment needs to reason about "how far has this board's
+  history genuinely advanced," not dead weight, just not load-bearing
+  for correctness today.
+- Route: `/board/:board_id` (kept `/` behaving exactly as before — the
+  fixed default, auto-hosted). A board nobody on the mesh answers for
+  (timeout, `@default_timeout_ms` 3s) redirects to `/` rather than
+  stranding the visitor on a dead page.
+
+**What this is NOT yet:** writing. A joining peer can watch a board
+live and see its full history, but has no way to draw into it — the
+canvas correctly disables itself (`can_draw?` false) rather than
+silently creating a second, split-brain local aggregate for someone
+else's board_id. Relaying a joining peer's stroke to the actual
+hosting peer (mesh RPC into that host's `draw_stroke` desk) is real,
+separate, not-yet-designed follow-on work, not an oversight.
+
+**Verification status:** unit-tested (`AnswerBoardSnapshotQueries`'s
+gating logic, the mesh-unavailable short-circuit) and manually
+exercised against a local boot for the two locally-provable paths (`/`
+still works; `/board/:known-local-id` finds it locally; `/board/
+:unknown-id` redirects cleanly with no mesh up). The actual
+query-publish -> host-reply -> materialize round trip has NOT yet been
+verified against two live peers the way basic mesh replication was —
+needs a real second board_id hosted on only one of beam01/beam02, then
+visiting `/board/:that-id` on the other.
 
 ---
 
 ## Nothing is committed anywhere
 
-Not a git repo yet. `git init` is a deliberate next step, not taken as
-part of writing this plan, per this workspace's rule to only take
-git-initializing/committing actions when explicitly asked.
+Stale as of the very first build session; this repo has been a normal
+git repo, pushed to `github.com/hecate-services/hecate-whiteboard`,
+since 2026-08-25. Left here only so the history of this doc stays
+honest about what it originally said.
