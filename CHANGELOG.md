@@ -62,6 +62,16 @@ Versioning: [SemVer](https://semver.org/).
   third state (sage, `dot-relay`) distinct from hosted (amber) and
   archived (grey). Live-verified in a real browser: drew on a board
   hosted only on beam01, from beam02, and watched it appear on both.
+- Deployed a third peer, `msi00.lab` — the first node off the beam
+  fleet, podman Quadlet + `podman auto-update` instead of docker +
+  watchtower (see `macula-io/macula-demo`'s
+  `infrastructure/msi00.lab/hecate-whiteboard.container`). Live-verified
+  as genuinely N-way, not pairwise: `/boards` on msi00 discovered both
+  beam01's and beam02's boards in one query window, and a stroke_id
+  drawn on msi00 was confirmed present on both. Then repointed msi00 at
+  `station-it-milan` (beam01/beam02 both use station-de-frankfurt) and
+  re-ran everything, so the proof is of a genuine cross-station hop, not
+  three peers fanning out from one shared relay.
 
 ### Fixed
 

@@ -1,11 +1,13 @@
 # Plan: hecate-whiteboard — Real-Time Multi-User Whiteboard Over Mesh
 
-**Status:** Boards on separate hosts replicate each other's strokes over
-real macula pubsub, live-verified bidirectional on `beam01.lab` and
-`beam02.lab` (`http://beam0N.lab:8493/`) — draw on one, it appears on
-the other within seconds. `host_board` + `draw_stroke` desks,
+**Status:** Live on THREE nodes across TWO real stations —
+`beam01.lab`/`beam02.lab` (docker+watchtower, station-de-frankfurt) and
+`msi00.lab` (podman Quadlet, station-it-milan). Boards replicate,
+cross-node join and discovery work, and a joining peer can draw
+(write-relay) — all confirmed live across the station boundary, not
+just same-relay fan-out. `host_board` + `draw_stroke` desks,
 `project_boards` (PRJ) + `query_boards` (QRY), a real Phoenix/LiveView
-canvas (`hecate_whiteboard_web`), and basic mesh replication
+canvas (`hecate_whiteboard_web`), and mesh replication
 (`StrokeDrawnV1ToMesh` + `BoardMeshSubscriber`) are all built, tested,
 and deployed. Visual design: a chalk-on-slate canvas (warm charcoal,
 chalk-white ink, one amber accent), host/peer status made visible
@@ -558,6 +560,80 @@ was sage not amber, drew a stroke on beam02's canvas, then opened the
 SAME board on beam01 in a second tab and confirmed the identical stroke
 was there too — the relay genuinely reached the real host, not just a
 local-only optimistic draw.
+
+### Third peer: msi00.lab — DONE 2026-08-25, same day
+
+User asked whether every mesh-broadcast mechanism built today (basic
+replication, `join_board`, the board-list picker, write-relay) would
+actually hold with more than two participants, then asked to deploy a
+third peer to prove it rather than just reason about it. Every one of
+those mechanisms was ALREADY designed broadcast-first, not pairwise —
+a query collects replies from whoever answers, a relay dispatches
+everywhere and lets the aggregate's own rule filter to one, stroke
+replication is a shared topic with no notion of "the other peer" at
+all — so the claim was that node count should not matter. Untested
+until now.
+
+**Deployment shape is genuinely different from beam01/beam02**, not
+just a third copy of the same thing: msi00.lab runs podman + Quadlet
+units + `podman auto-update` (registry polling), not docker + compose +
+watchtower + the pull-based git reconciler the beam fleet uses — see
+`macula-io/macula-demo`'s own `infrastructure/msi00.lab/
+hecate-whiteboard.container` for the unit, mirroring that node's
+existing `hecate-dronex.container`/`hecate-embedder.container`
+conventions (own disk at `/home`, no `/bulk0`, no `:Z` — Arch, no
+SELinux — every env var explicit, conservative `CPUQuota`/`MemoryMax`
+since this is somebody's workstation and not a fleet box). Installed
+via the `hecate-reconciler.service` already running on that node
+(watches `~/.hecate/gitops/` locally, symlinks into
+`~/.config/containers/systemd/`) — confirmed with the user as the
+intended path for new msi00 services, since the workspace-level note
+calling that mechanism "temporarily obsolete, do not build on it" was
+written before dronex started actually using it.
+
+`HECATE_REALM` had to be the byte-identical value beam01/beam02 already
+hold, or this peer would boot fine and just never find their boards —
+propagated node-to-node (beam01 → msi00) via a generalized
+`scripts/enroll-hecate-whiteboard-secret.sh --from-node` mode in
+macula-demo, SSH-to-SSH, never transiting the workstation that
+triggered it. Found and fixed two real bugs getting a clean boot:
+
+1. The secret script's own hex-format validation assumed lowercase-only
+   (matching `enroll-dronex-secret.sh`'s convention for a DIFFERENT
+   realm), but the actual deployed `HECATE_REALM` on beam01/beam02 uses
+   uppercase hex. Fixed to accept both cases, preserving whatever case
+   arrives verbatim rather than normalizing it.
+2. Podman does not auto-create a bind-mount source directory the way
+   `docker compose` does — first boot failed with
+   `statfs: no such file or directory` until `~/.hecate/hecate-whiteboard`
+   existed on the host first.
+
+**Live-verified as genuinely 3-way, not just "a third node exists"**:
+opened `/boards` on msi00 cold and it correctly listed BOTH beam01's
+and beam02's boards under "on other nodes" in the same ~1.5s query
+window the 2-node version already used — the multi-reply collector
+needed no change at all to handle a second remote answerer. Drew a
+stroke on msi00's own default board and confirmed the exact stroke_id
+landed in BOTH beam01's and beam02's read models (not just an
+increased count, which today's earlier catch-up-replay history made an
+unreliable signal on its own); drew the reverse direction (beam01 →
+msi00) and confirmed msi00 received it too. Every mechanism proven
+broadcast-safe today was actually only ever tested pairwise before
+this — this is the first real N-way confirmation, N=3.
+
+**Then asked and confirmed a sharper question**: msi00's first cut
+pointed at the SAME station as beam01/beam02 (frankfurt), for
+simplicity — meaning every message in that first round still fanned
+out from one shared relay, and the whole "3-node" proof above didn't
+actually show discovery/replication survive a real cross-station hop.
+Repointed msi00 at `station-it-milan` (the same one `hecate-dronex`
+already leads with from that node, so no new station enters the
+topology) and re-ran everything: `/boards` discovery still found both
+beam boards through the Milan relay, and a stroke_id drawn on msi00
+was confirmed present on both beam01 AND beam02 (and the reverse,
+beam02 → msi00) with the two ends now genuinely routing through
+different stations rather than a shared one. This is the version of
+the claim actually worth trusting.
 
 **Verification status: live-verified end to end, 2026-08-25.** Unit
 tests cover `AnswerBoardSnapshotQueries`'s gating logic and the
