@@ -19,21 +19,26 @@ defmodule ProjectBoards.StrokeDrawnV1ToBoardShapes.StrokeDrawnV1ToBoardShapes do
   def handle_event("stroke_drawn_v1", event, _metadata, state) do
     data = field(:data, event)
     board_id = field(:board_id, data)
+    stroke_id = field(:stroke_id, data)
 
-    stroke = %{
-      stroke_id: field(:stroke_id, data),
-      points: field(:points, data),
-      color: field(:color, data),
-      width: field(:width, data)
-    }
+    # Guards against evoq's catchup replay on restart re-delivering this
+    # host's own full local history -- see Store's module doc for why.
+    if Store.new_stroke?(stroke_id) do
+      stroke = %{
+        stroke_id: stroke_id,
+        points: field(:points, data),
+        color: field(:color, data),
+        width: field(:width, data)
+      }
 
-    :ets.insert(Store.board_shapes_table(), {board_id, stroke})
+      :ets.insert(Store.board_shapes_table(), {board_id, stroke})
 
-    Phoenix.PubSub.broadcast(
-      HecateWhiteboardWeb.PubSub,
-      "board:" <> board_id,
-      {:stroke_drawn, stroke}
-    )
+      Phoenix.PubSub.broadcast(
+        HecateWhiteboardWeb.PubSub,
+        "board:" <> board_id,
+        {:stroke_drawn, stroke}
+      )
+    end
 
     {:ok, state}
   end

@@ -27,21 +27,28 @@ defmodule ProjectBoards.BoardMeshSubscriber do
   def handle_event(@topic, payload, _meta, state) when is_map(payload) do
     fact = normalize(payload)
     board_id = field(:board_id, fact)
+    stroke_id = field(:stroke_id, fact)
 
-    stroke = %{
-      stroke_id: field(:stroke_id, fact),
-      points: field(:points, fact),
-      color: field(:color, fact),
-      width: field(:width, fact)
-    }
+    # Guards against a peer's own catchup-replay restart re-publishing its
+    # full local history to this topic -- see ProjectBoards.Store's module
+    # doc. Without this, every restart on the OTHER end re-drew that
+    # peer's entire history on this one.
+    if ProjectBoards.Store.new_stroke?(stroke_id) do
+      stroke = %{
+        stroke_id: stroke_id,
+        points: field(:points, fact),
+        color: field(:color, fact),
+        width: field(:width, fact)
+      }
 
-    :ets.insert(ProjectBoards.Store.board_shapes_table(), {board_id, stroke})
+      :ets.insert(ProjectBoards.Store.board_shapes_table(), {board_id, stroke})
 
-    Phoenix.PubSub.broadcast(
-      HecateWhiteboardWeb.PubSub,
-      "board:" <> board_id,
-      {:stroke_drawn, stroke}
-    )
+      Phoenix.PubSub.broadcast(
+        HecateWhiteboardWeb.PubSub,
+        "board:" <> board_id,
+        {:stroke_drawn, stroke}
+      )
+    end
 
     {:noreply, state}
   end

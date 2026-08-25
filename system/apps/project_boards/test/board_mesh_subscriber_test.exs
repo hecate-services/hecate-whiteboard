@@ -14,6 +14,7 @@ defmodule ProjectBoards.BoardMeshSubscriberTest do
 
   setup do
     :ets.delete_all_objects(Store.board_shapes_table())
+    :ets.delete_all_objects(Store.board_strokes_seen_table())
     :ok
   end
 
@@ -52,5 +53,21 @@ defmodule ProjectBoards.BoardMeshSubscriberTest do
              BoardMeshSubscriber.handle_event("some.other.topic", %{board_id: "x"}, %{}, nil)
 
     assert :ets.lookup(Store.board_shapes_table(), "x") == []
+  end
+
+  test "drops a redelivered stroke_id instead of storing it twice" do
+    # Regression for the catchup-replay bug: a peer's restart re-publishes
+    # its full local history to this topic, so the same stroke_id arrives
+    # more than once. Without the dedup guard this used to re-broadcast
+    # (and, if the two deliveries ever differed in shape, double-insert)
+    # on every redelivery.
+    payload = %{board_id: "board-duptest", stroke_id: "s3", points: [%{x: 1, y: 2}], color: "#f2efe6", width: 3}
+
+    assert {:noreply, nil} = BoardMeshSubscriber.handle_event(@topic, payload, %{}, nil)
+    assert {:noreply, nil} = BoardMeshSubscriber.handle_event(@topic, payload, %{}, nil)
+    assert {:noreply, nil} = BoardMeshSubscriber.handle_event(@topic, payload, %{}, nil)
+
+    assert [{"board-duptest", %{stroke_id: "s3"}}] =
+             :ets.lookup(Store.board_shapes_table(), "board-duptest")
   end
 end
