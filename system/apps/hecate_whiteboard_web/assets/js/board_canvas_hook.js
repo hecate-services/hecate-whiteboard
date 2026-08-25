@@ -217,10 +217,10 @@ export const BoardCanvas = {
 
     this.shapes = []; // every confirmed canvas shape (stroke/rectangle/ellipse/triangle)
     this.domShapes = new Map(); // shape_id -> {el, kind, points, color, text} for stickies/text
-    this.selectedShapeId = null;
-    this.selectedKind = null; // "canvas" | "dom"
-    this.moving = null; // {shapeId, kind, startPoint, originalPoints}
-    this.clipboard = null; // {kind, points, color, width?, text?} -- copy/cut/paste
+    this.selection = new Map(); // shape_id -> "canvas" | "dom" -- zero, one, or many
+    this.moving = null; // {startPoint, items: [{shapeId, kind, originalPoints}]} -- one drag, any mix of canvas/dom shapes
+    this.marquee = null; // {start} while a select-tool drag over empty canvas is rubber-banding
+    this.clipboard = null; // [{kind, points, color, width?, text?}, ...] -- copy/cut/paste, whole selection
 
     this.cursors = new Map(); // peer_id -> {el, x, y}
     this.settleTimer = null;
@@ -353,20 +353,20 @@ export const BoardCanvas = {
 
   // The ONE place that applies a changed camera everywhere it matters:
   // the canvas-drawn layer (committed shapes, via redrawCommitted), the
-  // pending layer (the selection outline, if anything's selected --
-  // drawSelectionOutline is safe to call unconditionally, see its own
+  // pending layer (the selection outline(s), if anything's selected --
+  // drawSelectionOutlines is safe to call unconditionally, see its own
   // comment), the DOM shapes layer (a plain CSS transform -- see
   // .shapes-layer's own comment for why individual stickies/text/ghost
   // need no changes of their own), and presence cursors (kept in screen
   // space deliberately, so peer markers/labels stay a constant SIZE
   // regardless of zoom instead of scaling with board content -- see
   // repositionCursors). Does NOT touch an in-progress gesture (a live
-  // stroke/geometry-drag/move-drag) -- panning or zooming mid-gesture
-  // is not a supported combination, same as every other tool.
+  // stroke/geometry-drag/move-drag/marquee) -- panning or zooming
+  // mid-gesture is not a supported combination, same as every other tool.
   applyCamera() {
     this.shapesLayer.style.transform = `translate(${this.camera.x}px, ${this.camera.y}px) scale(${this.camera.zoom})`;
     this.redrawCommitted();
-    this.drawSelectionOutline();
+    this.drawSelectionOutlines();
     this.repositionCursors();
     this.updateZoomIndicator();
   },
@@ -497,7 +497,7 @@ export const BoardCanvas = {
 
   setTool(tool) {
     this.activeTool = tool;
-    this.deselectShape();
+    this.clearSelection();
     if (tool !== "sticky") this.hideGhost();
 
     document.querySelectorAll("[data-tool]").forEach((b) => {
@@ -554,11 +554,20 @@ export const BoardCanvas = {
 
     if (this.activeTool === "select") {
       const hit = this.hitTestCanvasShape(p);
+
       if (hit) {
-        this.selectShape(hit.shape_id, "canvas");
-        this.moving = { shapeId: hit.shape_id, kind: "canvas", startPoint: p, originalPoints: hit.points };
+        // Clicking a shape that's already part of the current
+        // selection drags the WHOLE selection together; clicking one
+        // outside it replaces the selection with just that shape first
+        // -- same convention as onShapeDown's own DOM-shape handling
+        // (they share beginMove for exactly this reason).
+        if (!this.selection.has(hit.shape_id)) {
+          this.setSelection(new Map([[hit.shape_id, "canvas"]]));
+        }
+        this.beginMove(p);
       } else {
-        this.deselectShape();
+        this.setSelection(new Map());
+        this.beginMarquee(p);
       }
     }
   },
@@ -580,19 +589,11 @@ export const BoardCanvas = {
       return;
     }
 
-    if (this.moving && this.moving.kind === "canvas") {
-      const p = this.point(e);
-      const dx = p.x - this.moving.startPoint.x;
-      const dy = p.y - this.moving.startPoint.y;
-      const translated = this.moving.originalPoints.map((pt) => ({ x: pt.x + dx, y: pt.y + dy }));
-      this._lastMoveTranslated = translated;
-
-      const shape = this.shapes.find((s) => s.shape_id === this.moving.shapeId);
-      this.withCamera(this.pending, (ctx) => {
-        drawShape(ctx, { ...shape, points: translated });
-      });
-      return;
-    }
+    // Moving and marquee-select both track the pointer at the WINDOW
+    // level (started by beginMove/beginMarquee), not here -- a drag
+    // needs to keep tracking even if the pointer leaves the canvas
+    // bounds mid-gesture, same reason onShapeDown's own DOM-shape drag
+    // always has.
 
     // Live placement preview -- a ghost of the sticky-to-be, following
     // the pointer so its size/color is never a surprise. See CSS
@@ -630,20 +631,10 @@ export const BoardCanvas = {
       if (Math.abs(p.x - start.x) >= minSize || Math.abs(p.y - start.y) >= minSize) {
         this.pushEvent("draw_geometry", { kind, points: [start, p], color: this.color });
       }
-      return;
     }
 
-    if (this.moving && this.moving.kind === "canvas") {
-      this.clearCanvas(this.pending);
-
-      const last = this._lastMoveTranslated;
-      if (last) {
-        this.pushEvent("move_shape", { shape_id: this.moving.shapeId, points: last });
-      }
-      this.moving = null;
-      this._lastMoveTranslated = null;
-      this.drawSelectionOutline();
-    }
+    // Moving and marquee-select finish at the window level (see
+    // beginMove/beginMarquee) -- nothing to do here for either.
   },
 
   updateGhost(point) {
@@ -699,10 +690,10 @@ export const BoardCanvas = {
         return;
       }
 
-      if (this.activeTool === "select" && this.selectedShapeId && !inTextInput) {
+      if (this.activeTool === "select" && this.selection.size > 0 && !inTextInput) {
         if (e.key === "Backspace" || e.key === "Delete") {
-          this.pushEvent("remove_shape", { shape_id: this.selectedShapeId });
-          this.deselectShape();
+          this.selection.forEach((_kind, shapeId) => this.pushEvent("remove_shape", { shape_id: shapeId }));
+          this.clearSelection();
           return;
         }
       }
@@ -712,12 +703,12 @@ export const BoardCanvas = {
 
       const key = e.key.toLowerCase();
       if (key === "c") {
-        this.copySelectedShape();
+        this.copySelection();
       } else if (key === "x") {
-        this.copySelectedShape();
-        if (this.selectedShapeId) {
-          this.pushEvent("remove_shape", { shape_id: this.selectedShapeId });
-          this.deselectShape();
+        this.copySelection();
+        if (this.selection.size > 0) {
+          this.selection.forEach((_kind, shapeId) => this.pushEvent("remove_shape", { shape_id: shapeId }));
+          this.clearSelection();
         }
       } else if (key === "v") {
         this.pasteClipboard();
@@ -726,14 +717,10 @@ export const BoardCanvas = {
   },
 
   // Aborts whatever's actively being drawn or dragged, WITHOUT
-  // committing anything to the server -- the canvas/shape ends up
-  // exactly as it was before the gesture started. The active tool
-  // itself is untouched (matches Figma/Excalidraw convention: Escape
-  // cancels the current stroke, not the tool you're in). A DOM shape
-  // (sticky/text) mid-drag is handled separately, inside onShapeDown's
-  // own closure -- its move state lives in local variables there, not
-  // on `this`, so it needs its own Escape listener rather than this one
-  // reaching in.
+  // committing anything to the server -- the canvas/shape(s) end up
+  // exactly where they were before the gesture started. The active
+  // tool itself is untouched (matches Figma/Excalidraw convention:
+  // Escape cancels the current gesture, not the tool you're in).
   cancelGesture() {
     if (this.drawing) {
       this.drawing = false;
@@ -748,68 +735,73 @@ export const BoardCanvas = {
       return;
     }
 
-    if (this.moving && this.moving.kind === "canvas") {
-      this.moving = null;
-      this._lastMoveTranslated = null;
-      this.drawSelectionOutline();
+    if (this.moving) {
+      this.moving.cancel();
+      return;
+    }
+
+    if (this.marquee) {
+      this.marquee.cancel();
     }
   },
 
-  copySelectedShape() {
-    if (!this.selectedShapeId) return;
+  // Snapshots the WHOLE selection, not just one shape -- clipboard is
+  // an array now, one entry per selected shape, so pasting a
+  // marquee-selected group reproduces the whole group.
+  copySelection() {
+    if (this.selection.size === 0) return;
 
-    if (this.selectedKind === "canvas") {
-      const shape = this.shapes.find((s) => s.shape_id === this.selectedShapeId);
-      if (shape) {
-        this.clipboard = { kind: shape.kind, points: shape.points, color: shape.color, width: shape.width };
+    this.clipboard = [];
+    this.selection.forEach((kind, shapeId) => {
+      if (kind === "canvas") {
+        const shape = this.shapes.find((s) => s.shape_id === shapeId);
+        if (shape) {
+          this.clipboard.push({ kind: shape.kind, points: shape.points, color: shape.color, width: shape.width });
+        }
+      } else {
+        const entry = this.domShapes.get(shapeId);
+        if (entry) {
+          this.clipboard.push({ kind: entry.kind, points: entry.points, color: entry.color, text: entry.text });
+        }
       }
-    } else if (this.selectedKind === "dom") {
-      const entry = this.domShapes.get(this.selectedShapeId);
-      if (entry) {
-        this.clipboard = { kind: entry.kind, points: entry.points, color: entry.color, text: entry.text };
-      }
-    }
+    });
   },
 
   // No backend command needed for any of copy/cut/paste -- paste just
   // re-dispatches the same command a fresh placement would use (stroke/
   // place_sticky/place_text/draw_geometry), each of which already mints
   // its own shape_id server-side, so a pasted shape is simply a new
-  // shape from the server's point of view.
+  // shape from the server's point of view. One dispatch per clipboard
+  // entry -- there's no batch-placement command, and there doesn't need
+  // to be one: each arrives, renders, and offsets identically whether
+  // it came from a single-shape or whole-group copy.
   pasteClipboard() {
     if (!this.clipboard) return;
+    this.clipboard.forEach((item) => this.pasteOne(item));
+  },
 
-    const points = this.clipboard.points.map((p) => ({
+  pasteOne(item) {
+    const points = item.points.map((p) => ({
       x: p.x + PASTE_OFFSET_PX,
       y: p.y + PASTE_OFFSET_PX,
     }));
 
-    switch (this.clipboard.kind) {
+    switch (item.kind) {
       case "stroke":
-        this.pushEvent("stroke", { points, color: this.clipboard.color, width: this.clipboard.width });
+        this.pushEvent("stroke", { points, color: item.color, width: item.width });
         break;
 
       case "sticky":
-        this.pushEvent("place_sticky", {
-          x: points[0].x,
-          y: points[0].y,
-          color: this.clipboard.color,
-          text: this.clipboard.text,
-        });
+        this.pushEvent("place_sticky", { x: points[0].x, y: points[0].y, color: item.color, text: item.text });
         break;
 
       case "text":
-        this.pushEvent("place_text", {
-          x: points[0].x,
-          y: points[0].y,
-          color: this.clipboard.color,
-          text: this.clipboard.text,
-        });
+        this.pushEvent("place_text", { x: points[0].x, y: points[0].y, color: item.color, text: item.text });
         break;
 
       default:
-        if (GEOMETRY_KINDS.includes(this.clipboard.kind)) {
-          this.pushEvent("draw_geometry", { kind: this.clipboard.kind, points, color: this.clipboard.color });
+        if (GEOMETRY_KINDS.includes(item.kind)) {
+          this.pushEvent("draw_geometry", { kind: item.kind, points, color: item.color });
         }
     }
   },
@@ -906,47 +898,57 @@ export const BoardCanvas = {
     return stroke.points.length === 1 && Math.hypot(point.x - stroke.points[0].x, point.y - stroke.points[0].y) <= threshold;
   },
 
-  selectShape(shapeId, kind) {
-    this.deselectShape();
-    this.selectedShapeId = shapeId;
-    this.selectedKind = kind;
+  // Replaces the WHOLE selection (a Map of shape_id -> "canvas"|"dom")
+  // -- zero, one, or many shapes, mixed kinds allowed. The one place
+  // that owns the .shape-selected CSS class and the canvas outline
+  // layer, so nothing else touches either directly.
+  setSelection(selection) {
+    this.selection.forEach((kind, shapeId) => {
+      if (kind !== "dom") return;
+      const entry = this.domShapes.get(shapeId);
+      if (entry) entry.el.classList.remove("shape-selected");
+    });
 
-    if (kind === "dom") {
+    this.selection = selection;
+
+    this.selection.forEach((kind, shapeId) => {
+      if (kind !== "dom") return;
       const entry = this.domShapes.get(shapeId);
       if (entry) entry.el.classList.add("shape-selected");
-    } else {
-      this.drawSelectionOutline();
-    }
+    });
+
+    this.drawSelectionOutlines();
   },
 
-  deselectShape() {
-    if (this.selectedKind === "dom" && this.selectedShapeId) {
-      const entry = this.domShapes.get(this.selectedShapeId);
-      if (entry) entry.el.classList.remove("shape-selected");
-    }
-    this.selectedShapeId = null;
-    this.selectedKind = null;
-
-    this.clearCanvas(this.pending);
+  clearSelection() {
+    this.setSelection(new Map());
   },
 
   // Always clears pending first, whether or not anything is selected --
   // makes this safe to call any time pending needs a refresh (see
-  // applyCamera), not just right after a selection changes.
-  drawSelectionOutline() {
+  // applyCamera), not just right after a selection changes. Draws one
+  // dashed box per canvas shape currently selected (DOM shapes get
+  // their own outline via the .shape-selected CSS class instead, set
+  // in setSelection).
+  drawSelectionOutlines() {
     this.clearCanvas(this.pending);
-    if (this.selectedKind !== "canvas") return;
-    const shape = this.shapes.find((s) => s.shape_id === this.selectedShapeId);
-    if (!shape) return;
 
-    const box = boundingBox(shape.points);
+    const canvasSelected = [...this.selection.entries()].filter(([, kind]) => kind === "canvas");
+    if (canvasSelected.length === 0) return;
+
     this.withCamera(this.pending, (ctx) => {
-      ctx.save();
-      ctx.strokeStyle = "#d89b4a";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([5, 4]);
-      ctx.strokeRect(box.minX - 6, box.minY - 6, box.maxX - box.minX + 12, box.maxY - box.minY + 12);
-      ctx.restore();
+      canvasSelected.forEach(([shapeId]) => {
+        const shape = this.shapes.find((s) => s.shape_id === shapeId);
+        if (!shape) return;
+
+        const box = boundingBox(shape.points);
+        ctx.save();
+        ctx.strokeStyle = "#d89b4a";
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]);
+        ctx.strokeRect(box.minX - 6, box.minY - 6, box.maxX - box.minX + 12, box.maxY - box.minY + 12);
+        ctx.restore();
+      });
     });
   },
 
@@ -998,55 +1000,189 @@ export const BoardCanvas = {
     if (this.activeTool !== "select") return;
     e.stopPropagation();
 
-    const entry = this.domShapes.get(shapeId);
-    if (!entry) return;
+    // Same convention as onCanvasDown's own canvas-shape handling (they
+    // share beginMove for exactly this reason): clicking a shape
+    // already part of the current selection drags the whole group;
+    // clicking one outside it replaces the selection with just that
+    // shape first.
+    if (!this.selection.has(shapeId)) {
+      if (!this.domShapes.has(shapeId)) return;
+      this.setSelection(new Map([[shapeId, "dom"]]));
+    }
 
-    this.selectShape(shapeId, "dom");
+    this.beginMove(this.point(e));
+  },
 
-    const start = this.point(e);
-    const originX = parseFloat(entry.el.style.getPropertyValue("--sx"));
-    const originY = parseFloat(entry.el.style.getPropertyValue("--sy"));
+  // Starts a drag of the CURRENT selection -- one or many shapes,
+  // canvas and/or DOM mixed freely. Window-level listeners (not scoped
+  // to the canvas) so the drag keeps tracking even if the pointer
+  // leaves the canvas bounds. Escape cancellation goes through
+  // cancelGesture -> this.moving.cancel() -- deliberately NOT its own
+  // separate "keydown" listener (unlike the single-shape DOM-drag this
+  // replaced): wireKeyboardShortcuts is the one place that owns Escape,
+  // so there's exactly one path to reason about instead of two
+  // listeners racing on the same keypress.
+  beginMove(startPoint) {
+    const items = [...this.selection.entries()].map(([shapeId, kind]) => {
+      const originalPoints =
+        kind === "canvas"
+          ? this.shapes.find((s) => s.shape_id === shapeId).points
+          : this.domShapes.get(shapeId).points;
+      return { shapeId, kind, originalPoints };
+    });
+
+    let lastTranslated = items.map(({ shapeId, originalPoints }) => ({ shapeId, translated: originalPoints }));
+
+    const applyDelta = (dx, dy) => {
+      lastTranslated = items.map((item) => ({
+        shapeId: item.shapeId,
+        kind: item.kind,
+        translated: item.originalPoints.map((pt) => ({ x: pt.x + dx, y: pt.y + dy })),
+      }));
+
+      lastTranslated
+        .filter((item) => item.kind === "dom")
+        .forEach((item) => {
+          const entry = this.domShapes.get(item.shapeId);
+          entry.el.style.setProperty("--sx", item.translated[0].x + "px");
+          entry.el.style.setProperty("--sy", item.translated[0].y + "px");
+        });
+
+      const canvasItems = lastTranslated.filter((item) => item.kind === "canvas");
+      this.withCamera(this.pending, (ctx) => {
+        canvasItems.forEach((item) => {
+          const shape = this.shapes.find((s) => s.shape_id === item.shapeId);
+          drawShape(ctx, { ...shape, points: item.translated });
+        });
+      });
+    };
 
     const onMove = (moveEvent) => {
       const p = this.point(moveEvent);
-      const dx = p.x - start.x;
-      const dy = p.y - start.y;
-      entry.el.style.setProperty("--sx", originX + dx + "px");
-      entry.el.style.setProperty("--sy", originY + dy + "px");
+      applyDelta(p.x - startPoint.x, p.y - startPoint.y);
     };
 
-    const cleanup = () => {
+    const cleanupListeners = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("keydown", onKeydown);
     };
 
     const onUp = (upEvent) => {
-      cleanup();
+      cleanupListeners();
+      this.moving = null;
 
       const p = this.point(upEvent);
-      const dx = p.x - start.x;
-      const dy = p.y - start.y;
-      if (dx === 0 && dy === 0) return;
+      if (p.x !== startPoint.x || p.y !== startPoint.y) {
+        lastTranslated.forEach(({ shapeId, translated }) => {
+          this.pushEvent("move_shape", { shape_id: shapeId, points: translated });
+        });
+      }
 
-      const newPoints = [{ x: originX + dx, y: originY + dy }];
-      this.pushEvent("move_shape", { shape_id: shapeId, points: newPoints });
-    };
-
-    // This drag's own move state (originX/originY/start) lives in these
-    // local variables, not on `this` -- cancelGesture (the global
-    // Escape handler) has no way to reach it, so this drag needs its
-    // own Escape listener, cleaned up the same way pointerup's is.
-    const onKeydown = (keyEvent) => {
-      if (keyEvent.key !== "Escape") return;
-      cleanup();
-      entry.el.style.setProperty("--sx", originX + "px");
-      entry.el.style.setProperty("--sy", originY + "px");
+      this.clearCanvas(this.pending);
+      this.drawSelectionOutlines();
     };
 
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-    window.addEventListener("keydown", onKeydown);
+
+    this.moving = {
+      cancel: () => {
+        cleanupListeners();
+        this.moving = null;
+
+        items
+          .filter((item) => item.kind === "dom")
+          .forEach((item) => {
+            const entry = this.domShapes.get(item.shapeId);
+            entry.el.style.setProperty("--sx", item.originalPoints[0].x + "px");
+            entry.el.style.setProperty("--sy", item.originalPoints[0].y + "px");
+          });
+
+        this.clearCanvas(this.pending);
+        this.drawSelectionOutlines();
+      },
+    };
+  },
+
+  // Rubber-band select: a select-tool drag starting on empty canvas.
+  // Intersection, not full-containment -- a shape only needs to be
+  // touched by the marquee, matching Figma's default "touch" behavior
+  // (more forgiving than requiring the whole shape inside the box).
+  beginMarquee(startPoint) {
+    const draw = (rect) => {
+      this.withCamera(this.pending, (ctx) => {
+        ctx.save();
+        ctx.fillStyle = "rgba(216, 155, 74, 0.12)";
+        ctx.strokeStyle = "#d89b4a";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        ctx.fillRect(rect.minX, rect.minY, rect.maxX - rect.minX, rect.maxY - rect.minY);
+        ctx.strokeRect(rect.minX, rect.minY, rect.maxX - rect.minX, rect.maxY - rect.minY);
+        ctx.restore();
+      });
+    };
+
+    const rectFrom = (p) => ({
+      minX: Math.min(startPoint.x, p.x),
+      minY: Math.min(startPoint.y, p.y),
+      maxX: Math.max(startPoint.x, p.x),
+      maxY: Math.max(startPoint.y, p.y),
+    });
+
+    let lastRect = rectFrom(startPoint);
+
+    const onMove = (moveEvent) => {
+      lastRect = rectFrom(this.point(moveEvent));
+      draw(lastRect);
+    };
+
+    const cleanupListeners = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    const onUp = () => {
+      cleanupListeners();
+      this.marquee = null;
+      this.clearCanvas(this.pending);
+      this.setSelection(this.shapesWithinRect(lastRect));
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+
+    this.marquee = {
+      cancel: () => {
+        cleanupListeners();
+        this.marquee = null;
+        this.clearCanvas(this.pending);
+      },
+    };
+  },
+
+  // Canvas shapes use their real bounding box; DOM shapes (stickies/
+  // text) use just their anchor point (points[0]) rather than their
+  // actual on-screen footprint -- a deliberate simplification, good
+  // enough for a rubber-band gesture without threading each element's
+  // live CSS size through world-space math.
+  shapesWithinRect(rect) {
+    const selection = new Map();
+
+    this.shapes.forEach((shape) => {
+      const box = boundingBox(shape.points);
+      const intersects =
+        box.minX <= rect.maxX && box.maxX >= rect.minX && box.minY <= rect.maxY && box.maxY >= rect.minY;
+      if (intersects) selection.set(shape.shape_id, "canvas");
+    });
+
+    this.domShapes.forEach((entry, shapeId) => {
+      const [pt] = entry.points;
+      if (pt.x >= rect.minX && pt.x <= rect.maxX && pt.y >= rect.minY && pt.y <= rect.maxY) {
+        selection.set(shapeId, "dom");
+      }
+    });
+
+    return selection;
   },
 
   applyMove(shapeId, points) {
@@ -1054,7 +1190,7 @@ export const BoardCanvas = {
     if (idx !== -1) {
       this.shapes[idx] = { ...this.shapes[idx], points };
       this.redrawCommitted();
-      if (this.selectedShapeId === shapeId) this.drawSelectionOutline();
+      if (this.selection.has(shapeId)) this.drawSelectionOutlines();
       return;
     }
 
@@ -1067,7 +1203,11 @@ export const BoardCanvas = {
   },
 
   applyRemove(shapeId) {
-    if (this.selectedShapeId === shapeId) this.deselectShape();
+    if (this.selection.has(shapeId)) {
+      const next = new Map(this.selection);
+      next.delete(shapeId);
+      this.setSelection(next);
+    }
 
     const idx = this.shapes.findIndex((s) => s.shape_id === shapeId);
     if (idx !== -1) {

@@ -190,6 +190,29 @@ Versioning: [SemVer](https://semver.org/).
   convention. A text/sticky placement's own textarea already had its own
   Escape handler (clears and blurs); this doesn't touch that case.
 
+- Drag-select (marquee): dragging over empty canvas with the Select tool
+  active rubber-bands every shape it touches, canvas-drawn and DOM
+  (sticky/text) mixed freely, by intersection rather than requiring the
+  shape to be fully inside the box. Dragging any one shape in the
+  resulting selection moves the whole group together (one `move_shape`
+  dispatch per shape -- there's no batch command, and doesn't need to
+  be one); Backspace/Delete removes the whole group; Ctrl/Cmd+C/X/V
+  copy/cut/paste the whole group as one clipboard entry. Selection
+  became a genuine set (`shape_id -> "canvas"|"dom"`) instead of a
+  single `selectedShapeId`/`selectedKind` pair, and the two previously
+  separate move implementations (canvas shapes via `this.moving` +
+  `onCanvasMove`/`onCanvasUp`, DOM shapes via `onShapeDown`'s own
+  closure) unified into one `beginMove` that handles any mix of both --
+  needed for a marquee that can span both kinds in one drag. Verified
+  locally against a real running server with a direct hook-state
+  inspection harness (temporary, removed before shipping): marquee
+  intersection (including partial-overlap, not just full-containment),
+  group move with correct per-shape translated points, group move
+  Escape-cancel (zero server dispatches, positions genuinely revert),
+  group delete, group copy/paste, and marquee's own Escape-cancel all
+  confirmed correct by reading `HANDLE EVENT` counts and payloads
+  straight from the server log, not just visually.
+
 ### Fixed
 
 - **A real data-loss/corruption bug in `join_board`'s mesh snapshot**,
