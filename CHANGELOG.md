@@ -115,6 +115,25 @@ Versioning: [SemVer](https://semver.org/).
   previous entry's header-label change was already live on all three
   deployed nodes via watchtower/podman-auto-update.
 
+- Board picker goes live: `GuideBoardLifecycle.BoardLifecycleV1ToMesh` publishes
+  `board_initiated_v1`/`board_hosted_v1`/`board_archived_v1`/`board_renamed_v1`
+  to the mesh, each on its own topic (matching `StrokeDrawnV1ToMesh`'s own
+  precedent, not `ShapeMutatedV1ToMesh`'s shared one — these four are
+  distinct kinds of news, not variations of one action, so a future
+  consumer that only cares about one shouldn't have to filter the other
+  three). `ProjectBoards.BoardLifecycleMeshSubscriber` (four
+  `:macula_subscriber` children under one callback module, mirroring
+  macula-realm's `Tube.SubscriberStarter`) re-broadcasts them locally;
+  `HecateWhiteboardWeb.BoardsLive` accumulates per-board_id status bits
+  on top of its existing one-shot `ListBoardsOverMesh` pull (kept as the
+  cold-start baseline — mesh pubsub never replays for a subscriber that
+  joined late). A remote board seen only as `initiated` (not yet
+  `hosted`) renders as a non-clickable "initiated" badge instead of a
+  view-only link, since there's nothing to view yet; an `archived`
+  remote board drops out of the list entirely, mirroring
+  `ListHostedBoards`' own "hosted AND NOT archived" filter. Users no
+  longer need to reload `/boards` to see a board a peer just created.
+
 ### Fixed
 
 - Collapsing the toolbox side pane silently broke every subsequent

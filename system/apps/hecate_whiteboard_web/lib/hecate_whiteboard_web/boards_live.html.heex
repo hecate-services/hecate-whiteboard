@@ -37,19 +37,21 @@
 
     <h2 class="boards-section-heading">On other nodes</h2>
 
+    <% remote_boards = remote_boards(@remote_board_facts) %>
+
     <%= cond do %>
       <% @remote_boards_loading? -> %>
         <div class="boards-empty">
           <span>Checking the mesh…</span>
         </div>
-      <% @remote_boards == [] -> %>
+      <% remote_boards == [] -> %>
         <div class="boards-empty">
           <span>No boards found on other nodes.</span>
         </div>
       <% true -> %>
         <ul class="board-list">
-          <li :for={board <- @remote_boards} class="board-card">
-            <a href={"/board/" <> board.board_id}>
+          <li :for={board <- remote_boards} class="board-card">
+            <a :if={hosted?(board.status)} href={"/board/" <> board.board_id}>
               <span class="board-card-title">{board.title}</span>
               <span class="board-card-meta">
                 <span class="mono">{board.host}</span>
@@ -57,6 +59,14 @@
                 view only
               </span>
             </a>
+            <div :if={!hosted?(board.status)} class="board-card-pending">
+              <span class="board-card-title">{board.title}</span>
+              <span class="board-card-meta">
+                <span class="mono">{board.host}</span>
+                <span class="status-sep">·</span>
+                <span class="board-card-badge">initiated</span>
+              </span>
+            </div>
           </li>
         </ul>
     <% end %>

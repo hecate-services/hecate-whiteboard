@@ -11,6 +11,7 @@ defmodule GuideBoardLifecycle.Supervisor do
 
   use Supervisor
 
+  alias GuideBoardLifecycle.BoardLifecycleV1ToMesh
   alias GuideBoardLifecycle.DrawStroke.AnswerDrawStrokeRequestsStarter
   alias GuideBoardLifecycle.LeaveBoard.AnswerLeaveBoardRequestsStarter
   alias GuideBoardLifecycle.LeaveBoard.PeerDepartedV1ToMesh
@@ -26,6 +27,7 @@ defmodule GuideBoardLifecycle.Supervisor do
       handler(StrokeDrawnV1ToMesh),
       handler(PeerDepartedV1ToMesh),
       handler(ShapeMutatedV1ToMesh),
+      handler(BoardLifecycleV1ToMesh),
       {DynamicSupervisor,
        name: GuideBoardLifecycle.MeshSubscriberSupervisor, strategy: :one_for_one},
       AnswerDrawStrokeRequestsStarter,

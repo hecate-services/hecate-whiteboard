@@ -39,7 +39,8 @@ defmodule ProjectBoards.Supervisor do
       handler(ShapeMutatedToBoardShapes),
       {DynamicSupervisor, name: ProjectBoards.MeshSubscriberSupervisor, strategy: :one_for_one},
       ProjectBoards.BoardMeshSubscriberStarter,
-      ProjectBoards.ShapeMeshSubscriberStarter
+      ProjectBoards.ShapeMeshSubscriberStarter,
+      ProjectBoards.BoardLifecycleMeshSubscriberStarter
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

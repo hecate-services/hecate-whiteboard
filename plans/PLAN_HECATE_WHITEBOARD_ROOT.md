@@ -1150,6 +1150,109 @@ same discipline the last two fixes established.
 
 ---
 
+### Board picker goes live: board-lifecycle mesh notifications — DONE 2026-08-25
+
+Prompted by a real live-fleet report: a board created on beam01 didn't
+show up on beam02 or msi00. Investigation (fresh RPC call to
+`QueryBoards.ListBoardsOverMesh.call()` from beam02, then a real browser
+reload on both beam02 and msi00) confirmed the mesh-level discovery
+mechanism was correct — the board WAS found, on both peers, the moment
+they actually queried. The real gap: `HecateWhiteboardWeb.BoardsLive`
+only ever calls `ListBoardsOverMesh.call()` once, in `mount/3`. An
+already-open `/boards` tab has no way to learn about a board that came
+into existence after it loaded. Diagnosis, not a fix, led directly to
+this feature.
+
+**Design decision, revisited mid-build.** The first draft mirrored
+`ShapeMutatedV1ToMesh`'s shared-topic plumbing verbatim: one topic,
+`interested_in` listing all four event types, dispatch on an embedded
+`event_type` field. Challenged directly ("why a shared topic??") before
+the receiving side was built. On reflection the two cases aren't alike:
+`sticky_placed_v1`/`text_placed_v1`/`shape_moved_v1`/`shape_removed_v1`/
+`geometry_drawn_v1` are genuine variations of one concern ("what's drawn
+on this board changed") with exactly one consumer that needs all of them
+uniformly (the shape read-model projection). `board_initiated_v1`/
+`board_hosted_v1`/`board_archived_v1`/`board_renamed_v1` are not
+variations of one action — "created", "became permanently read-only",
+and "renamed" are distinct kinds of news, and a future consumer (an
+archive audit log, say) might reasonably want only one of them without
+filtering the rest. Switched to one topic per event type, which turned
+out to already have a precedent in this exact workspace:
+`draw_stroke`/`stroke_drawn_v1` never shared a topic with anything, and
+`macula-realm/system/apps/tube/lib/tube/subscriber_starter.ex`
+(`Tube.SubscriberStarter`) is the literal prior art for "several fixed
+topics, one shared callback module, one `DynamicSupervisor`" — copied
+that shape rather than inventing a new one.
+
+**What shipped:**
+
+- `GuideBoardLifecycle.BoardLifecycleV1ToMesh` (new, CMD side): one
+  `:evoq_event_handler`, `interested_in` lists all four event types, a
+  `@topics` map picks the topic per event type
+  (`io.macula/whiteboard-commons/whiteboard/board_{initiated,hosted,archived,renamed}_v1`).
+  Fact shape: `%{board_id, title, owner, host}` — `title`/`owner` are
+  `nil` on whichever event type doesn't carry them (only
+  `board_initiated_v1` carries `owner`; only `board_initiated_v1`/
+  `board_renamed_v1` carry `title`), which the receiving side treats as
+  "no update", never "clear this field". Wired into
+  `GuideBoardLifecycle.Supervisor` as one more `handler(...)` entry,
+  same as every other event-to-mesh emitter here.
+- `ProjectBoards.BoardLifecycleMeshSubscriber` + `..._Starter` (new, PRJ
+  side): the starter loops over four topics starting one
+  `:macula_subscriber` child per topic under the existing
+  `ProjectBoards.MeshSubscriberSupervisor`, all sharing the one
+  subscriber module — mirrors `Tube.SubscriberStarter` exactly, not
+  `BoardMeshSubscriberStarter`'s single-topic shape. The subscriber
+  itself does NOT touch the `boards` ETS table or `ProjectBoards.Store`
+  — this is the picker's "on other nodes" section talking about OTHER
+  hosts' boards, a transient concern of one LiveView, not a local read
+  model. It just normalizes the payload (same atom-vs-`{text, _}`
+  tolerance as every other mesh subscriber here, tested for both shapes)
+  and rebroadcasts locally as `Phoenix.PubSub.broadcast(HecateWhiteboardWeb.PubSub,
+  "boards:remote", {:remote_board_event, event_type, fact})`.
+- `HecateWhiteboardWeb.BoardsLive`: subscribes to `"boards:remote"` on
+  connected mount, in addition to (not instead of) the existing
+  `start_async(:discover_remote_boards, ...)` pull — the pull seeds the
+  baseline (every board it finds is by construction hosted somewhere, so
+  seeded with the `hosted` bit set via `GuideBoardLifecycle.BoardStatus`/
+  `:evoq_bit_flags`), the push keeps it current. New
+  `handle_info({:remote_board_event, event_type, fact}, socket)`
+  accumulates status bits per `board_id` into a `remote_board_facts` map
+  assign (mirroring `ProjectBoards.BoardLifecycleToBoards`'s own
+  accumulation logic and bit values: `initiated=1`, `hosted=4`), OR-ing
+  in whichever bit the event_type corresponds to and only overwriting
+  `title`/`owner` when the incoming fact actually carries one. A board
+  already in `@boards` (hosted by THIS node) is skipped outright — its
+  own lifecycle already flows through `ListHostedBoards`, and a node's
+  own mesh publish loops back through its own subscription, so without
+  this guard a locally-hosted board would double-list itself. An
+  `board_archived_v1` fact deletes the `board_id` from the accumulator
+  entirely, mirroring `ListHostedBoards`' own "hosted AND NOT archived"
+  filter — no un-archive path exists to reconcile against later.
+  `remote_boards/1` is the template-facing sorted view; a `nil` title
+  (possible if a `hosted`/`renamed` fact arrives before the `initiated`
+  fact that actually carries the title — four separate topics means no
+  cross-topic ordering guarantee, unlike a single shared mailbox) falls
+  back to rendering the `board_id` rather than blank.
+- Template: a remote board with the `hosted` bit set renders exactly as
+  before (clickable, "view only"). A remote board seen only as
+  `initiated` (not yet `hosted`) renders as a new `.board-card-pending`
+  block — same visual weight, dashed border instead of solid, not a
+  link, with an "initiated" badge chip — since there's genuinely nothing
+  to open yet. This directly matches the follow-up ask ("only make it
+  available for open when the owner opens it... decorate with an
+  'initiated'/'hosted' badge").
+
+**Verified:** `mix compile`, `mix test` (all pre-existing suites still
+green, 3 new tests for `BoardLifecycleMeshSubscriber` covering
+atom-keyed payloads, `{:text, _}`-tagged payloads, and topic filtering —
+same regression shape as `BoardMeshSubscriberTest`), `mix format
+--check-formatted`, full local `docker build`. Live-fleet verification
+(create a board on one node, confirm it appears on the other two without
+reloading) still pending — next step before calling this done.
+
+---
+
 ## Nothing is committed anywhere
 
 Stale as of the very first build session; this repo has been a normal
