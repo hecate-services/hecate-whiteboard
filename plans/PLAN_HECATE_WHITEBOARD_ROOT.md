@@ -1260,6 +1260,33 @@ correctly. A fresh load of beam02's `/boards` also showed it via the
 pull baseline. This closes the "board not showing up on beam02/msi00"
 report that prompted this whole feature.
 
+### Board picker badges: fix stale "view only", add "hosted here" — DONE 2026-08-25
+
+Follow-up report, same session: opened a locally-hosted board on beam01
+fine, but noticed remote boards on other nodes' pickers still said
+"view only". That text predates write-relay (a joined board has been
+genuinely drawable, relayed to the host, since the write-relay feature
+shipped earlier this session) — it was never updated, so it was now
+actively wrong, not just imprecise. `board_live.ex`'s own `status_hint`
+already had the correct wording ("Draws relay to the host over the
+mesh") for the board VIEW; only the picker's card text was stale.
+
+Replaced "view only" with a `relay` badge chip (reusing the
+`.board-card-badge` styling from the initiated/hosted split above), and
+added a matching amber `hosted here` badge on locally-hosted boards for
+symmetry — both carry a `title` tooltip spelling out what they mean.
+`.board-card-badge-hosted` (amber text/border via `--amber`/
+`--amber-soft`) distinguishes it from the neutral-grey badges used for
+`relay`/`initiated`.
+
+**Verified:** `mix compile`, `mix test`, `mix format --check-formatted`,
+full local `docker build`, pushed (`1981d15`), CI green, all three nodes
+rolled (beam01 19:42:44 UTC, beam02 19:43:10 UTC, msi00 19:45:07 UTC via
+its next `podman-auto-update.timer` cycle). Live-verified in a real
+browser: msi00's picker shows `RELAY` badges on beam01's three remote
+boards; beam01's own picker shows `HOSTED HERE` badges (amber) on the
+same three boards from its own side.
+
 ---
 
 ## Nothing is committed anywhere
