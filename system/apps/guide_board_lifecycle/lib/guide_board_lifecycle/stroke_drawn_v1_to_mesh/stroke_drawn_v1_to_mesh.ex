@@ -12,6 +12,21 @@ defmodule GuideBoardLifecycle.StrokeDrawnV1ToMesh.StrokeDrawnV1ToMesh do
   # own convention (see macula-io/CLAUDE.md's "Massive Scale Topic
   # Design" -- board_id lives in the payload, not baked into the topic
   # string), mirroring hecate-tube's channel_announcement.erl shape.
+  #
+  # KNOWN GAP, confirmed live 2026-08-25, not fixed here: evoq's own
+  # catchup replay re-delivers a host's FULL local history to every
+  # registered handler on every boot (confirmed: "[evoq] Catch-up
+  # board_store: routed N events" in the logs) -- this handler has no way
+  # to tell "genuinely new" from "replayed on restart", so it
+  # re-publishes every historical stroke to mesh on every restart. A
+  # peer that already has those strokes (from before, or from its OWN
+  # catchup) ends up with duplicate ETS bag entries and an inflated
+  # stroke count until its own restart cleans it up. Same root cause as
+  # the "no dedup on stroke_id" simplification already noted in
+  # ProjectBoards.BoardMeshSubscriber -- a stroke_id-keyed dedup on the
+  # receiving side (ETS :set instead of :bag, or an explicit seen-set)
+  # would fix both at once. Not done here: basic replication was the
+  # goal, not exactly-once delivery.
   @behaviour :evoq_event_handler
 
   @topic "io.macula/whiteboard-commons/whiteboard/stroke_drawn_v1"

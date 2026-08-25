@@ -10,5 +10,9 @@ defmodule GuideBoardLifecycle.MeshPublisher do
   def init(_args), do: {:ok, nil}
 
   @impl true
-  def handle_published(_result, state), do: {:stop, :normal, state}
+  def handle_published(result, state) do
+    require Logger
+    Logger.info("[MeshPublisher] outcome: #{inspect(result)}")
+    {:stop, :normal, state}
+  end
 end
