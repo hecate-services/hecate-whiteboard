@@ -1287,6 +1287,48 @@ browser: msi00's picker shows `RELAY` badges on beam01's three remote
 boards; beam01's own picker shows `HOSTED HERE` badges (amber) on the
 same three boards from its own side.
 
+### Board picker: "N here" presence badge — DONE 2026-08-25
+
+Follow-up, same session: user asked for a prominent badge showing
+whether a board is currently open somewhere, then half-answered their
+own question noting remote peers can already edit via relay anyway --
+so what actually matters isn't "did the host specifically open it" but
+"is anyone here right now" (a live-collab signal), regardless of which
+node they connected through. Confirmed `TrackPresence.Roster` already
+receives EVERY peer's `cursor_settled_v1` mesh-wide (not board- or
+host-scoped), so `Roster.list_for_board/1` answers this correctly from
+any node for any board, local or remote, with zero new mesh plumbing --
+just a lookup.
+
+Picked a genuinely distinct color rather than reusing green: `--sage`
+already means "drawable via relay" (`dot-relay`) and `--amber` already
+means "this is the one true server" (`dot-live`) in this design
+system's own stated vocabulary. A third "green = someone's here" badge
+would collide with `dot-relay`'s existing meaning if it reused sage, so
+added `--moss` (a more saturated, distinctly different green) instead.
+Filled/bordered chip (not just outlined) per the "prominent" ask,
+showing an actual count ("2 here") rather than a bare dot, and worded
+"here" specifically to avoid colliding with "live"'s already-claimed
+meaning (hosted, not present) in this codebase.
+
+Implementation: `BoardsLive` polls every 5s (`@presence_poll_ms`) rather
+than subscribing per-board_id -- presence already has its own ~20s
+staleness window, so sub-second freshness isn't the bar, and the
+board_id list itself keeps changing as remote boards are discovered, so
+a fixed set of topic subscriptions doesn't fit cleanly. Badge shows on
+both locally-hosted and remote-relay cards (not on a pending/initiated
+card -- nothing to be present on there).
+
+**Verified:** `mix compile`, `mix test`, `mix format --check-formatted`,
+full local `docker build`, pushed (`eaf15b6`), CI green, all three nodes
+rolled (beam01 20:01:43 UTC, beam02 20:01:10 UTC, msi00 22:05:25 CEST via
+its timer). Live-verified in a real browser, no reload: opened
+"LinkedIn Demo" on beam01 in one tab (moved the cursor to trigger a real
+settle), and the already-open `/boards` tab picked up a moss-green
+"1 HERE" badge on its next poll tick with no reload. Closed that tab;
+the badge disappeared on the picker's own next poll tick, confirming
+`terminate/2`'s `Roster.remove` fires promptly on disconnect.
+
 ---
 
 ## Nothing is committed anywhere
