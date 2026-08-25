@@ -1329,6 +1329,30 @@ settle), and the already-open `/boards` tab picked up a moss-green
 the badge disappeared on the picker's own next poll tick, confirming
 `terminate/2`'s `Roster.remove` fires promptly on disconnect.
 
+**Known debt, explicitly accepted for now, not silently deferred:** the
+5s poll is the only polling loop in this codebase -- every other piece
+of realtime state here (strokes, shapes, board lifecycle, cursors) is
+push-based over mesh pubsub or `Phoenix.PubSub`. Accepted as a
+PoC-stage shortcut; flagged by the user as architecturally unacceptable
+long-term, agreed. Root cause of why polling was easier: `Roster`'s
+`broadcast_locally/2` puts `board_id` only in the PubSub TOPIC
+(`"board:" <> board_id`), not in the message payload
+(`{:cursor_settled, cursor}` / `{:cursor_left, peer_id}`) -- fine for
+`board_live.ex`, which only ever subscribes to its own one board and
+already knows which board_id it's on; breaks down for a picker
+subscribing to N boards' topics in one process, since Phoenix.PubSub
+delivers no topic envelope and `{:cursor_left, peer_id}` alone can't
+say which board it's for.
+
+The real fix, sketched but not built: (1) `Roster` broadcasts
+`{:cursor_settled, board_id, cursor}` / `{:cursor_left, board_id,
+peer_id}` -- board_id explicit in the payload; `board_live.ex`'s
+existing handler just ignores the extra field. (2) `BoardsLive` tracks
+a subscribed-topics set, diffed against `@boards ++
+Map.keys(@remote_board_facts)` on every mount/async-discovery/mesh-event
+tick -- subscribe to newly-seen board_ids, unsubscribe from ones that
+drop out (archived, etc.) -- instead of the fixed timer.
+
 ---
 
 ## Nothing is committed anywhere
