@@ -18,9 +18,11 @@ a raw 500 -- Phoenix derives that view by naming convention when
 `render_errors` isn't configured, and it never existed), the
 stroke_id-keyed dedup this doc already called out as the obvious fix
 for the catchup-replay gap, and `join_board` itself (mesh-level
-discovery + snapshot fetch, view-only). See "join_board — DONE
+discovery + snapshot fetch, view-only) — **live-verified against
+beam01/beam02**, not just unit-tested. See "join_board — DONE
 2026-08-25 (discovery + snapshot, view-only)" below for the real shape
-of what shipped versus what this doc originally sketched.
+of what shipped versus what this doc originally sketched, and the
+verification section for the actual fleet test.
 
 **Previously (walking skeleton), for reference:** Repo:
 `github.com/hecate-services/hecate-whiteboard` (public). CI green
@@ -527,15 +529,22 @@ else's board_id. Relaying a joining peer's stroke to the actual
 hosting peer (mesh RPC into that host's `draw_stroke` desk) is real,
 separate, not-yet-designed follow-on work, not an oversight.
 
-**Verification status:** unit-tested (`AnswerBoardSnapshotQueries`'s
-gating logic, the mesh-unavailable short-circuit) and manually
-exercised against a local boot for the two locally-provable paths (`/`
-still works; `/board/:known-local-id` finds it locally; `/board/
-:unknown-id` redirects cleanly with no mesh up). The actual
-query-publish -> host-reply -> materialize round trip has NOT yet been
-verified against two live peers the way basic mesh replication was —
-needs a real second board_id hosted on only one of beam01/beam02, then
-visiting `/board/:that-id` on the other.
+**Verification status: live-verified end to end, 2026-08-25.** Unit
+tests cover `AnswerBoardSnapshotQueries`'s gating logic and the
+mesh-unavailable short-circuit; a local boot confirmed the two
+locally-provable paths (`/` still works; `/board/:known-local-id`
+finds it locally; `/board/:unknown-id` redirects cleanly with no mesh
+up). Then, against the real fleet: minted a fresh board_id via
+`bin/hecate_whiteboard rpc` on beam01 ONLY (`initiate_board` +
+`host_board`, title "Join test board"), never touched on beam02, then
+visited `/board/<that-id>` on beam02 cold. Confirmed via both nodes'
+logs (`[GetBoardSnapshotByIdOverMesh] query ...` on beam02 at
+13:18:31.192, `[AnswerBoardSnapshotQueries] reply ...` on beam01 at
+13:18:31.210 — an 18ms round trip) and the rendered page: beam02 shows
+the correct title from a board it never locally created, with
+`data-can-draw="false"` (view-only, correctly not the authority),
+while the SAME board_id on beam01 itself still shows
+`data-can-draw="true"`.
 
 ---
 

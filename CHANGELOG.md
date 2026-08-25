@@ -31,8 +31,11 @@ Versioning: [SemVer](https://semver.org/).
   a joined (not locally hosted) board reads as not-`hosted?`, so the
   existing `can_draw?` gating makes it correctly read-only with no
   template change. Writing into a remotely-hosted board is a separate,
-  not-yet-built follow-on. See the plan doc's "`join_board` — DONE
-  2026-08-25" section for the full design and what's still unverified.
+  not-yet-built follow-on. Live-verified against beam01/beam02: a board
+  minted and hosted on beam01 only was found and rendered correctly
+  (read-only) from beam02 cold, via a real mesh query/reply round trip.
+  See the plan doc's "`join_board` — DONE 2026-08-25" section for the
+  full design.
 
 ### Fixed
 
