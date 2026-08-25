@@ -1,9 +1,16 @@
 # Plan: hecate-whiteboard — Real-Time Multi-User Whiteboard Over Mesh
 
-**Status:** Design-only. No repo initialized, no code written, nothing
-committed anywhere. This doc captures a full design conversation
-(2026-08-25) and is the starting point for scaffolding — not a handover
-from a prior build.
+**Status:** Walking skeleton BUILT, verified, and deployed. Repo:
+`github.com/hecate-services/hecate-whiteboard` (public). CI green
+(`build-push.yml`, `lint.yml`), image published to
+`ghcr.io/hecate-services/hecate-whiteboard:latest`. Deployed to
+`beam00.lab` + `beam01.lab` via `macula-io/macula-demo`'s pull-based
+reconciler (commit `49f74eb`) — secret enrollment (`HECATE_REALM`) is the
+one step done out of band, see that repo's
+`infrastructure/scripts/enroll-hecate-whiteboard-secret.sh`. All three
+risks in "Risks / open verification items" below are resolved; see that
+section for what was actually found. Next: `host_board` + a bare LiveView
+page per the "Suggested build order" section.
 **Created:** 2026-08-25
 
 ---
@@ -218,32 +225,88 @@ apps/
 
 ---
 
-## Risks / open verification items
+## Risks / open verification items — RESOLVED 2026-08-25
 
-Ranked by how much they could reshape this plan if wrong:
+1. **`hecate_om_service` from Elixir: works, confirmed live.**
+   `HecateWhiteboard.Service` implements it directly
+   (`system/apps/hecate_whiteboard/lib/hecate_whiteboard/service.ex`);
+   `:hecate_om.boot/1` boots, auto-starts reckon-db + the evoq
+   subscription, and serves `/health` correctly, in both a local `mix
+   run` dev boot and the compiled `mix release` (`bin/hecate_whiteboard
+   start`), and inside the actual container image. Two real bugs found
+   and fixed along the way, both mine, both interop traps worth carrying
+   forward to any future Elixir hecate_om consumer:
+   - `HecateWhiteboard.Service.data_dir/0` and `config/runtime.exs`'s
+     `identity_key_path` independently computed the data dir with
+     *different* defaults (one `/var/lib/...`, one `/tmp/...`) — two
+     sources of truth for the same env var, only one of which was
+     dev-writable. Fixed by making both read `HECATE_DATA_DIR` with the
+     same default.
+   - **`data_dir/0`'s spec says `string()`, which in Erlang means a
+     charlist, not an Elixir binary.** Returning an Elixir binary
+     survives `filename:join/2` (returns a binary fine) but then crashes
+     deep inside `ra`'s directory setup: `dets:open_file/2` rejects a
+     binary `file` option outright with `{badarg, ...}`. Confirmed
+     directly against this OTP: `dets:open_file(x, [{file, <<"...">>}])`
+     raises, `dets:open_file(x, [{file, "..."}])` works. Fixed with
+     `String.to_charlist/1` on every file-path-shaped `hecate_om` config
+     value (`data_dir/0`, `identity_key_path`, `service_cert_path`,
+     `station_socket`). **Any future Elixir service implementing
+     `hecate_om_service` will hit this exact trap on `store_id/0` +
+     `data_dir/0` unless it already knows this.**
+2. **No Elixir scaffold generator: confirmed, worked around by hand.**
+   Assembled via plain `mix new --umbrella` + `mix new --sup` per app,
+   mirroring `hecate-mpong-bot`'s proven CMD-app shape and hecate-tube's
+   actual (post-storm) `initiate_channel` desk triad. Not a blocker in
+   practice — see `system/` for the result.
+3. **LiveView-vs-mesh-lifecycle: still open, deferred on purpose.** Not
+   reached yet — this walking skeleton has no LiveView/web app at all
+   (see "Suggested build order" step 3 onward). Still the first real
+   design question once `host_board` + the canvas UI start.
 
-1. **`hecate_om_service` behaviour, implemented from Elixir, has never
-   been done.** Should work mechanically (`@behaviour :hecate_om_service`
-   plus the six callbacks is ordinary Erlang/Elixir interop, no different
-   in kind from calling `:evoq_router` or `:macula` directly), but the
-   boot sequence (`hecate_om_sup` auto-starting before the service's own
-   `start/1`, health endpoint wiring, identity/cert loading) has only
-   ever been exercised inside a `rebar3 new hecate_service`-scaffolded
-   Erlang release. First thing to prove with a walking skeleton, before
-   building anything else on top of it.
-2. **hecate-om's scaffold tooling (`scripts/scaffold-service.sh`) only
-   generates Erlang/rebar3 projects.** The Elixir/Phoenix umbrella here
-   has to be hand-assembled from a plain `mix new --umbrella` plus the
-   `hecate_om_service` wiring done by hand, mirroring what the scaffold
-   would have produced rather than running it. Not a blocker, just means
-   no generator to lean on for the substrate app.
-3. **LiveView socket lifecycle vs. mesh connection lifecycle** — a
-   LiveView process is comparatively short-lived (reconnects on page
-   refresh, network blip); the board's mesh RPC/pubsub subscriptions need
-   to survive that without re-running `join_board` on every reconnect.
-   Needs a clear owning process (a per-board or per-session GenServer
-   outliving the LiveView) — not designed yet, first real technical
-   question for the event-storming pass.
+### New facts found during the build, not anticipated above
+
+- **`mix release` for an umbrella needs an explicit `releases:` block**
+  naming which child apps to include (`applications: [app: :permanent,
+  ...]`) — plain `mix release` refuses with a clear error otherwise. See
+  `system/mix.exs`.
+- **The `[:erts]` copy race is real, not Erlang-specific.** `mix release`
+  assembling `erts` via a parallel `Task` intermittently fails with
+  `could not change mode for .../bin/erl: no such file or directory`.
+  Reproduced locally on the very first `mix release` attempt.
+  `ELIXIR_ERL_OPTIONS="+S 1" mix release` fixes it — same workaround
+  `macula-realm`'s own Dockerfile already carries for the identical bug,
+  confirmed independently here.
+- **This workspace's committed-lockfile ban applies in full, and it
+  breaks a naive Dockerfile.** `COPY mix.exs mix.lock ./` fails CI
+  outright (`mix.lock` doesn't exist in the checkout, by design). The
+  fix is to not copy it at all and resolve deps fresh every build — not
+  specific to this repo, applies to every Elixir Dockerfile in this
+  workspace.
+- **A non-root container user fighting a bind-mounted `/data` is real
+  friction, not a hypothetical.** Tried a `useradd --create-home app` +
+  `USER app` runtime stage first; hit `{error, enoent}` from
+  `filelib:ensure_path` on an unwritable bind mount. Matched
+  hecate-tube's own Containerfile instead (root, no non-root user) — no
+  UID-alignment problem to solve for a service with no untrusted input to
+  sandbox against.
+- **`network_mode: host` correctly resolves the container's Erlang
+  distribution name to the actual host's hostname** (`hecate_whiteboard
+  @host00.lab`, not a random container id) — confirmed locally with
+  `RELEASE_NODE`/`RELEASE_DISTRIBUTION=name` set. Matters because those
+  are mix release's own env var names, not hecate-tube's Erlang/relx ones
+  (`HECATE_NODE_NAME`/`HECATE_COOKIE`) — copying the Erlang service's
+  compose env vars verbatim would have silently done nothing.
+- **hex.pm lag is real, not just a documented risk.** `hecate_om` 0.15.0
+  exists in the local working tree's `.app.src` but was never published;
+  hex.pm's actual latest is 0.14.2. Pinned to `~> 0.14.2`. (0.15.0 adds
+  `read_model_id/0` for a barrel_docdb-backed read model — relevant to
+  `project_boards`/`query_boards` later, not to this skeleton.)
+- **Local dev Docker daemon needed explicit `--pids-limit -1 --memory
+  2g`** to boot the release at all (`Cannot fork` otherwise) — a sandbox/
+  daemon-config artifact of this particular dev machine, not something
+  the beam fleet's own docker+watchtower setup is expected to need (not
+  present in hecate-tube's compose either).
 
 ## Deferred, not decided against
 
