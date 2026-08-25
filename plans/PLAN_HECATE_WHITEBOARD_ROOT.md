@@ -619,6 +619,50 @@ came back fully intact (3 strokes, both boards) instead of empty. beam02
 confirmed unaffected too (2 strokes, exactly matching pre-restart).
 `join_board` regression-checked working afterward.
 
+### Board picker went mesh-aware, plus `rename_board` — DONE 2026-08-25
+
+User feedback after using the deployed app: "beams don't see each
+other" and "can't change the title of an existing board." Investigated
+the first before assuming it was real -- dispatched a stroke on beam01
+via RPC, confirmed it appeared on beam02 within seconds (and the
+reverse), so live drawing replication was never broken. The actual
+issue: `/boards` only ever listed boards THIS node hosts, so beam01's
+and beam02's picker pages showed disjoint lists with no indication
+there was more elsewhere.
+
+Fixed with a second query/reply pair, same supervised
+macula_publisher/macula_subscriber shape as `join_board`:
+`QueryBoards.AnswerBoardListQueries` answers on every node (no
+authority gating -- "what do I host" is always safe to say, unlike
+`join_board`'s single-authority question), and
+`QueryBoards.ListBoardsOverMesh` collects replies for a fixed 1.5s
+window instead of stopping at the first one (a new
+`QueryBoards.ManyShotMeshReply` subscriber variant forwards every
+message rather than stopping after one). Merged results dedup by
+board_id (the default board is legitimately multi-hosted under
+symmetric-gossip replication) and tag each board with which host
+answered. Fetched via LiveView's `start_async/3` so the page never
+blocks -- local boards render immediately, mesh results fill in a
+moment later.
+
+`rename_board` (CMD desk, mirrors `archive_board`'s shape exactly:
+`rename_board_v1` -> `board_renamed_v1`, gated the same way --
+`:not_initiated` / `:archived`) makes the topbar title clickable
+(only when this node hosts the board) into an inline-editable input.
+
+**Live-verified both, together, in a real browser** (not just curl):
+opened `/boards` on beam01 and beam02 side by side, confirmed each
+correctly showed the other's boards tagged "view only." Renamed a
+board on beam02 (one the browser testing itself had created earlier,
+titled "Untitled board" by the create form's own empty-title default
+-- a second, confusingly-identical "Untitled board" sitting right next
+to the real default board, which is exactly the kind of mess
+`rename_board` exists to let someone clean up) to "beam02 test board"
+by clicking the title, typing, and pressing Enter -- confirmed it
+persisted across a reload AND propagated to beam01's mesh-discovered
+list within the same 1.5s query window, no manual refresh needed
+beyond the normal page load.
+
 ---
 
 ## Nothing is committed anywhere

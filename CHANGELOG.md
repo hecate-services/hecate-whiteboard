@@ -42,6 +42,15 @@ Versioning: [SemVer](https://semver.org/).
   snapshot) plus a "new board" form that mints and hosts a fresh board
   through the already-existing `initiate_board`/`host_board` desks. The
   main board view's brand/logo now links to `/boards`.
+- Board picker is now mesh-aware: an "On other nodes" section fetched
+  asynchronously (`QueryBoards.ListBoardsOverMesh`, `AnswerBoardListQueries`)
+  so it never blocks the page. Live-verified: beam01's picker correctly
+  shows beam02's boards and vice versa.
+- `rename_board`: a board's title, previously set once at creation and
+  never editable, can now be changed by clicking it in the topbar (only
+  when this node is the board's host). New CMD desk
+  (`rename_board_v1` -> `board_renamed_v1`), mirrors `archive_board`'s
+  shape.
 
 ### Fixed
 
