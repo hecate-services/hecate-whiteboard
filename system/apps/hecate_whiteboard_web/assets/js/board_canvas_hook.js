@@ -690,6 +690,15 @@ export const BoardCanvas = {
     window.addEventListener("keydown", (e) => {
       const inTextInput = e.target.tagName === "TEXTAREA" || e.target.isContentEditable;
 
+      // A text/sticky placement's own textarea has its own Escape
+      // handler (clears the value, blurs -- see placeShapeInline), so
+      // this deliberately does nothing while one is focused rather than
+      // fighting it or double-handling the same keypress.
+      if (e.key === "Escape" && !inTextInput) {
+        this.cancelGesture();
+        return;
+      }
+
       if (this.activeTool === "select" && this.selectedShapeId && !inTextInput) {
         if (e.key === "Backspace" || e.key === "Delete") {
           this.pushEvent("remove_shape", { shape_id: this.selectedShapeId });
@@ -714,6 +723,36 @@ export const BoardCanvas = {
         this.pasteClipboard();
       }
     });
+  },
+
+  // Aborts whatever's actively being drawn or dragged, WITHOUT
+  // committing anything to the server -- the canvas/shape ends up
+  // exactly as it was before the gesture started. The active tool
+  // itself is untouched (matches Figma/Excalidraw convention: Escape
+  // cancels the current stroke, not the tool you're in). A DOM shape
+  // (sticky/text) mid-drag is handled separately, inside onShapeDown's
+  // own closure -- its move state lives in local variables there, not
+  // on `this`, so it needs its own Escape listener rather than this one
+  // reaching in.
+  cancelGesture() {
+    if (this.drawing) {
+      this.drawing = false;
+      this.points = [];
+      this.clearCanvas(this.pending);
+      return;
+    }
+
+    if (this.drawingGeometry) {
+      this.drawingGeometry = null;
+      this.clearCanvas(this.pending);
+      return;
+    }
+
+    if (this.moving && this.moving.kind === "canvas") {
+      this.moving = null;
+      this._lastMoveTranslated = null;
+      this.drawSelectionOutline();
+    }
   },
 
   copySelectedShape() {
@@ -976,9 +1015,14 @@ export const BoardCanvas = {
       entry.el.style.setProperty("--sy", originY + dy + "px");
     };
 
-    const onUp = (upEvent) => {
+    const cleanup = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("keydown", onKeydown);
+    };
+
+    const onUp = (upEvent) => {
+      cleanup();
 
       const p = this.point(upEvent);
       const dx = p.x - start.x;
@@ -989,8 +1033,20 @@ export const BoardCanvas = {
       this.pushEvent("move_shape", { shape_id: shapeId, points: newPoints });
     };
 
+    // This drag's own move state (originX/originY/start) lives in these
+    // local variables, not on `this` -- cancelGesture (the global
+    // Escape handler) has no way to reach it, so this drag needs its
+    // own Escape listener, cleaned up the same way pointerup's is.
+    const onKeydown = (keyEvent) => {
+      if (keyEvent.key !== "Escape") return;
+      cleanup();
+      entry.el.style.setProperty("--sx", originX + "px");
+      entry.el.style.setProperty("--sy", originY + "px");
+    };
+
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("keydown", onKeydown);
   },
 
   applyMove(shapeId, points) {

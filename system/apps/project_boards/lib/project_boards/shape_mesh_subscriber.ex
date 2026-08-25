@@ -52,6 +52,10 @@ defmodule ProjectBoards.ShapeMeshSubscriber do
 
   def handle_event(_topic, _payload, _meta, state), do: {:noreply, state}
 
+  # Guards against a peer's own catchup-replay restart re-publishing its
+  # full local history to this topic -- same reasoning as
+  # BoardMeshSubscriber's own new_shape? guard for strokes, just shared
+  # across every non-stroke kind too (see Store's module doc).
   defp place(board_id, kind, fact) do
     shape = %{
       kind: kind,
@@ -61,8 +65,10 @@ defmodule ProjectBoards.ShapeMeshSubscriber do
       text: field(:text, fact)
     }
 
-    :ets.insert(Store.board_shapes_table(), {board_id, shape})
-    broadcast(board_id, {:shape_placed, shape})
+    if Store.new_shape?(shape.shape_id) do
+      :ets.insert(Store.board_shapes_table(), {board_id, shape})
+      broadcast(board_id, {:shape_placed, shape})
+    end
   end
 
   defp place_geometry(board_id, fact) do
@@ -73,8 +79,10 @@ defmodule ProjectBoards.ShapeMeshSubscriber do
       color: field(:color, fact)
     }
 
-    :ets.insert(Store.board_shapes_table(), {board_id, shape})
-    broadcast(board_id, {:shape_placed, shape})
+    if Store.new_shape?(shape.shape_id) do
+      :ets.insert(Store.board_shapes_table(), {board_id, shape})
+      broadcast(board_id, {:shape_placed, shape})
+    end
   end
 
   defp broadcast(board_id, message),

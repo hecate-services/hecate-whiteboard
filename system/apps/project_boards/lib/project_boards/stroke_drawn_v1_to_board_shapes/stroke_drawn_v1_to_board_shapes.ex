@@ -23,7 +23,7 @@ defmodule ProjectBoards.StrokeDrawnV1ToBoardShapes.StrokeDrawnV1ToBoardShapes do
 
     # Guards against evoq's catchup replay on restart re-delivering this
     # host's own full local history -- see Store's module doc for why.
-    if Store.new_stroke?(stroke_id) do
+    if Store.new_shape?(stroke_id) do
       stroke = %{
         kind: "stroke",
         shape_id: stroke_id,

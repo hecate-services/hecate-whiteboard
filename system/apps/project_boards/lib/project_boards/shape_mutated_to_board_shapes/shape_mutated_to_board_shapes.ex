@@ -50,13 +50,21 @@ defmodule ProjectBoards.ShapeMutatedToBoardShapes.ShapeMutatedToBoardShapes do
     {:ok, state}
   end
 
+  # Guards against evoq's catchup replay on restart re-delivering this
+  # host's own full local history -- see Store's module doc for why.
+  # shape_moved_v1/shape_removed_v1 above don't need this: they act on
+  # an ALREADY-STORED shape via Store.move_shape/remove_shape (a
+  # find-then-replace, safe to repeat), whereas this clause inserts a
+  # brand new row every call.
   def handle_event(event_type, event, _metadata, state) do
     data = field(:data, event)
     board_id = field(:board_id, data)
     shape = to_shape(event_type, data)
 
-    :ets.insert(Store.board_shapes_table(), {board_id, shape})
-    broadcast(board_id, {:shape_placed, shape})
+    if Store.new_shape?(shape.shape_id) do
+      :ets.insert(Store.board_shapes_table(), {board_id, shape})
+      broadcast(board_id, {:shape_placed, shape})
+    end
 
     {:ok, state}
   end

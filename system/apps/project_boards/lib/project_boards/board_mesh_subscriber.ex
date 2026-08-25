@@ -33,7 +33,7 @@ defmodule ProjectBoards.BoardMeshSubscriber do
     # full local history to this topic -- see ProjectBoards.Store's module
     # doc. Without this, every restart on the OTHER end re-drew that
     # peer's entire history on this one.
-    if ProjectBoards.Store.new_stroke?(stroke_id) do
+    if ProjectBoards.Store.new_shape?(stroke_id) do
       stroke = %{
         kind: "stroke",
         shape_id: stroke_id,

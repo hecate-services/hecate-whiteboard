@@ -183,7 +183,38 @@ Versioning: [SemVer](https://semver.org/).
   tolerance rather than becoming impossibly precise when zoomed out or
   overly forgiving when zoomed in.
 
+- Escape cancels whatever's actively being drawn or dragged (an
+  in-progress pen stroke, a basic-shape drag, a select-tool move --
+  canvas-drawn or a DOM sticky/text) without committing anything to the
+  server. The active tool itself is untouched, matching Figma/Excalidraw
+  convention. A text/sticky placement's own textarea already had its own
+  Escape handler (clears and blurs); this doesn't touch that case.
+
 ### Fixed
+
+- **A real data-loss/corruption bug in `join_board`'s mesh snapshot**,
+  found live: msi00's view of a board hosted on beam01 was missing a
+  rectangle entirely and showed one sticky with its text, kind, and
+  shape_id all silently dropped. Root cause:
+  `GetBoardSnapshotByIdOverMesh`'s `normalize_stroke/1` (now
+  `normalize_shape/1`) only ever extracted `stroke_id`/`points`/`color`/
+  `width` — correct back when a snapshot's `shapes` list held nothing
+  but strokes, silently wrong once sticky/text/geometry shapes existed.
+  Worse, the redelivery-dedup filter was keyed on that same
+  now-always-nil `stroke_id` for non-stroke shapes, so `new_shape?(nil)`
+  (formerly `new_stroke?`) only ever let ONE non-stroke shape per
+  snapshot through — every other one got silently filtered out as an
+  apparent redelivery. Fixed by normalizing every shape kind generically
+  and deduping on `shape_id` (which every kind has, a stroke's own
+  `shape_id` already equals its `stroke_id`) instead. `Store`'s
+  dedup-guard table is renamed `board_shapes_seen`
+  (`new_shape?`/`board_shapes_seen_table`, was `board_strokes_seen`) to
+  match its now-actual scope, and the same guard was added to
+  `ShapeMutatedToBoardShapes`'s and `ShapeMeshSubscriber`'s own
+  shape-placement paths, which had the identical unguarded-insert gap
+  for the live (non-snapshot) replication path. Regression-tested
+  directly against `normalize_shape/1` and the dedup filter, no live
+  mesh needed.
 
 - Collapsing the toolbox side pane silently broke every subsequent
   canvas click coordinate: the canvas's pixel buffer and inline CSS

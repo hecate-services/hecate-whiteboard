@@ -14,7 +14,7 @@ defmodule ProjectBoards.BoardMeshSubscriberTest do
 
   setup do
     :ets.delete_all_objects(Store.board_shapes_table())
-    :ets.delete_all_objects(Store.board_strokes_seen_table())
+    :ets.delete_all_objects(Store.board_shapes_seen_table())
     :ok
   end
 
