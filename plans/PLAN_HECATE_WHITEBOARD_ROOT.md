@@ -1,6 +1,17 @@
 # Plan: hecate-whiteboard — Real-Time Multi-User Whiteboard Over Mesh
 
-**Status:** Walking skeleton BUILT, verified, and deployed. Repo:
+**Status:** Drawing works. `host_board` + `draw_stroke` desks, `project_boards`
+(PRJ) + `query_boards` (QRY), and a real Phoenix/LiveView canvas
+(`hecate_whiteboard_web`) are built and verified end to end locally,
+including inside the actual compiled container image (draw → reload →
+strokes persist via the snapshot query; multiple colors; the release's
+own Bandit endpoint, not just `mix phx.server`). Committed and pushed
+(`be2da6d`); CI in flight at time of writing. Visual design: a
+chalk-on-slate canvas (warm charcoal, chalk-white ink, one amber accent),
+host/peer status made visible rather than hidden. Not yet redeployed to
+beam01/beam02 -- see "Suggested build order" for what comes after.
+
+**Previously (walking skeleton), for reference:** Repo:
 `github.com/hecate-services/hecate-whiteboard` (public). CI green
 (`build-push.yml`, `lint.yml`), image published to
 `ghcr.io/hecate-services/hecate-whiteboard:latest`. Deployed to
@@ -359,16 +370,42 @@ end-to-end on the thinnest possible slice before building out the rest.
    Verify via a live boot smoke test (per the hecate-tube plan's reusable
    recipe), not just eunit/exunit — wiring bugs don't show up in unit
    tests here, they showed up twice in hecate-tube's own Phase 0.
-3. `host_board` + a bare LiveView page that renders an empty Konva stage.
-   Proves the mesh-boot-to-browser path.
-4. `draw_stroke` end to end: one browser, one stroke, host aggregate,
-   projection, back out to the same browser over the pubsub topic.
-   Proves the full CQRS loop before proving multi-peer.
+3. **DONE 2026-08-25.** `host_board` + a real LiveView page. Konva was
+   dropped in favor of plain HTML5 Canvas + a hand-rolled quadratic-curve
+   smoother (no npm dependency) — Konva's object model (layers, shape
+   dragging) isn't needed until `move_shape`/`remove_shape` exist; adding
+   it now would have been exactly the kind of premature dependency this
+   workspace's own style avoids. Proved the mesh-boot-to-browser path.
+4. **DONE 2026-08-25.** `draw_stroke` end to end: one browser, one
+   stroke, host aggregate, `project_boards` projection, back out to the
+   same browser over Phoenix.PubSub (LOCAL pubsub, not yet mesh pubsub —
+   that distinction matters for step 5). Verified with multiple strokes,
+   multiple colors, and persistence across a page reload via
+   `query_boards`' snapshot desk. Full detail, including two real bugs
+   found (evoq_event_handler's actual contract vs. evoq_projection's
+   unexercised documented one; the release's `applications:` list not
+   auto-including new umbrella apps), in `CHANGELOG.md` and the commit
+   message for `be2da6d`.
 5. `join_board` + the snapshot/reconciliation protocol, second browser
    as a second peer. This is where risk #3 (LiveView-vs-mesh lifecycle)
-   has to get resolved for real.
+   has to get resolved for real — and where local Phoenix.PubSub (used
+   for step 4, same-host reactivity) has to become real mesh pubsub for
+   a second peer on a different node to see live strokes at all.
 6. `move_shape` / `remove_shape` / `leave_board`, `track_presence`
    (cursors), rest of the desk list.
+
+### Known simplifications carried from the walking-skeleton phase, not yet revisited
+
+- `check_origin: false` on the Endpoint (no fronting domain yet).
+- `SECRET_KEY_BASE` falls back to a fixed, publicly-committed dev value
+  (see `config/runtime.exs`) — nothing of real value depends on it yet
+  (no accounts, no forms), but this needs a real provisioned secret
+  before this is anything more than a demo.
+- The default board is a single fixed id (`@default_board_id` in
+  `board_live.ex`) — no board creation/picker UX. Fine for proving
+  drawing; will need real board identity once `join_board` lets a second
+  peer target a SPECIFIC board rather than "whatever this host is
+  showing."
 
 ---
 
