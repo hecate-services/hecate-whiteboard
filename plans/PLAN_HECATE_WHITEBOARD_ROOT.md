@@ -1247,9 +1247,18 @@ that shape rather than inventing a new one.
 green, 3 new tests for `BoardLifecycleMeshSubscriber` covering
 atom-keyed payloads, `{:text, _}`-tagged payloads, and topic filtering —
 same regression shape as `BoardMeshSubscriberTest`), `mix format
---check-formatted`, full local `docker build`. Live-fleet verification
-(create a board on one node, confirm it appears on the other two without
-reloading) still pending — next step before calling this done.
+--check-formatted`, full local `docker build`. Pushed, CI green
+(build-and-push + lint-and-test), watchtower rolled beam01 (19:29:39
+UTC) and beam02 (19:30:10 UTC), `podman-auto-update` rolled msi00 in the
+same window. **Live-fleet verified with real browser tabs, no reload
+anywhere:** with msi00's `/boards` already open, created "Live Mesh Push
+Test" on beam01 — it appeared on msi00's untouched tab within a couple
+seconds, correctly rendered as a clickable "view only" hosted card, not
+stuck on the "initiated" badge, confirming `board_initiated_v1` and
+`board_hosted_v1` both arrived on their separate topics and merged
+correctly. A fresh load of beam02's `/boards` also showed it via the
+pull baseline. This closes the "board not showing up on beam02/msi00"
+report that prompted this whole feature.
 
 ---
 
