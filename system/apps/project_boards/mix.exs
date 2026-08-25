@@ -31,7 +31,11 @@ defmodule ProjectBoards.MixProject do
       # PRJ app can broadcast live writes without depending on the web app.
       # LiveViews subscribe and react; they never call this app directly.
       # See macula-io/CLAUDE.md's "Phoenix LiveView Architecture" rule.
-      {:phoenix_pubsub, "~> 2.3"}
+      {:phoenix_pubsub, "~> 2.3"},
+      # For BoardMeshSubscriber: :hecate_om.mesh_handles/0 and
+      # :macula_subscriber directly.
+      {:hecate_om, "~> 0.14.2"},
+      {:macula, "~> 10.1"}
     ]
   end
 end

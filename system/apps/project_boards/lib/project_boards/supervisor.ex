@@ -18,7 +18,9 @@ defmodule ProjectBoards.Supervisor do
     children = [
       ProjectBoards.Store,
       handler(BoardLifecycleToBoards),
-      handler(StrokeDrawnV1ToBoardShapes)
+      handler(StrokeDrawnV1ToBoardShapes),
+      {DynamicSupervisor, name: ProjectBoards.MeshSubscriberSupervisor, strategy: :one_for_one},
+      ProjectBoards.BoardMeshSubscriberStarter
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
