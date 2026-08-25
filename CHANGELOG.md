@@ -51,6 +51,17 @@ Versioning: [SemVer](https://semver.org/).
   when this node is the board's host). New CMD desk
   (`rename_board_v1` -> `board_renamed_v1`), mirrors `archive_board`'s
   shape.
+- Write-relay: a joined (not locally hosted) board is now drawable, not
+  just viewable. A stroke drawn there is published as a request instead
+  of dispatched locally; `AnswerDrawStrokeRequests` (every node)
+  dispatches it through the SAME local path a host's own draw already
+  uses, and `BoardAggregate`'s existing `:not_hosted` rule makes every
+  node except the real host a safe no-op -- no new authority-check
+  logic needed. The confirmed stroke comes back through the existing
+  replication path, so no reply/ack is needed either. Status dot gets a
+  third state (sage, `dot-relay`) distinct from hosted (amber) and
+  archived (grey). Live-verified in a real browser: drew on a board
+  hosted only on beam01, from beam02, and watched it appear on both.
 
 ### Fixed
 

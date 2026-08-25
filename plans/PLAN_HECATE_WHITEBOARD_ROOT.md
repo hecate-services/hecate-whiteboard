@@ -522,13 +522,42 @@ out-of-band host link.
   (timeout, `@default_timeout_ms` 3s) redirects to `/` rather than
   stranding the visitor on a dead page.
 
-**What this is NOT yet:** writing. A joining peer can watch a board
-live and see its full history, but has no way to draw into it — the
-canvas correctly disables itself (`can_draw?` false) rather than
-silently creating a second, split-brain local aggregate for someone
-else's board_id. Relaying a joining peer's stroke to the actual
-hosting peer (mesh RPC into that host's `draw_stroke` desk) is real,
-separate, not-yet-designed follow-on work, not an oversight.
+**Writing from a joined board — DONE 2026-08-25, same day.** Was
+view-only at first (see above); user asked "I cannot draw on a remote
+whiteboard?" and the write-relay got built same session. `MaybeDrawStroke.
+relay/1` publishes the raw draw params (board_id, points, color, width)
+instead of dispatching locally, to a fixed `draw_stroke_request_v1`
+topic every node listens on (`AnswerDrawStrokeRequests`). The responder
+does nothing clever: it calls `MaybeDrawStroke.dispatch/1`, the SAME
+function a local draw already uses, and lets `BoardAggregate`'s
+existing `:not_hosted` business rule do the authority check for free —
+on every node except the real host, dispatching against a board this
+node never hosted (or never even initiated) returns
+`{:error, :not_hosted}`, silently dropped. On the real host it succeeds
+exactly like a local draw, and the confirmed stroke comes back to the
+relaying peer through the ALREADY-existing `stroke_drawn_v1` ->
+`StrokeDrawnV1ToMesh` -> `BoardMeshSubscriber` path it already watches
+to view the board — no reply/ack mechanism needed at all.
+
+`can_draw?` broadened to `not archived?` (drawing works whether or not
+this node hosts the board); a new, separate `can_rename?` stays
+`hosted? and not archived?` so broadening draw permission didn't
+silently also enable renaming a board this node doesn't own. Status
+dot gets a third state (`dot-relay`, sage, distinct from amber
+`dot-live`) so a relay-drawable board still visibly isn't "the one true
+server" the way a hosted one is — same host/peer honesty this app has
+had since session 1.
+
+Added the one test that was missing and turned out to be load-bearing:
+`draw_stroke`'s `:not_hosted` rejection had never been tested despite
+being the exact mechanism the whole relay design depends on for safety.
+
+**Live-verified in a real browser**: opened the beam01-only "Join test
+board" from beam02 (view-only before this), confirmed the status dot
+was sage not amber, drew a stroke on beam02's canvas, then opened the
+SAME board on beam01 in a second tab and confirmed the identical stroke
+was there too — the relay genuinely reached the real host, not just a
+local-only optimistic draw.
 
 **Verification status: live-verified end to end, 2026-08-25.** Unit
 tests cover `AnswerBoardSnapshotQueries`'s gating logic and the
