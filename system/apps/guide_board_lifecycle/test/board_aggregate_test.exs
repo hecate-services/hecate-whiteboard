@@ -201,4 +201,93 @@ defmodule GuideBoardLifecycle.BoardAggregateTest do
     {:ok, state} = BoardAggregate.init("board-test")
     assert {:error, :unknown_command} = BoardAggregate.execute(state, %{command_type: :nonsense})
   end
+
+  # Load-bearing for AnswerLeaveBoardRequests the same way draw_stroke's
+  # own :not_hosted rejection is load-bearing for AnswerDrawStrokeRequests
+  # -- this is what makes every node except the real host a safe no-op.
+  test "leave_board rejects a board that isn't hosted here" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    assert {:error, :not_hosted} =
+             BoardAggregate.execute(state, %{
+               command_type: :leave_board,
+               board_id: "board-test",
+               peer_id: "peer-1"
+             })
+  end
+
+  test "leave_board succeeds once a board is hosted" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    {:ok, [hosted]} =
+      BoardAggregate.execute(state, %{command_type: :host_board, board_id: "board-test"})
+
+    state = BoardAggregate.apply(state, hosted)
+
+    assert {:ok, [departed]} =
+             BoardAggregate.execute(state, %{
+               command_type: :leave_board,
+               board_id: "board-test",
+               peer_id: "peer-1"
+             })
+
+    assert departed.event_type == "peer_departed_v1"
+  end
+
+  # Deliberately different from rename_board/draw_stroke: leaving doesn't
+  # mutate board content, so it stays valid even after archive_board --
+  # see BoardAggregate's own comment on why this desk has no archived
+  # guard.
+  test "leave_board succeeds on an archived board" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    {:ok, [hosted]} =
+      BoardAggregate.execute(state, %{command_type: :host_board, board_id: "board-test"})
+
+    state = BoardAggregate.apply(state, hosted)
+
+    {:ok, [archived]} =
+      BoardAggregate.execute(state, %{command_type: :archive_board, board_id: "board-test"})
+
+    state = BoardAggregate.apply(state, archived)
+
+    assert {:ok, [departed]} =
+             BoardAggregate.execute(state, %{
+               command_type: :leave_board,
+               board_id: "board-test",
+               peer_id: "peer-1"
+             })
+
+    assert departed.event_type == "peer_departed_v1"
+  end
 end

@@ -34,7 +34,8 @@ defmodule HecateWhiteboardWeb.MixProject do
       {:jason, "~> 1.4"},
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
       {:guide_board_lifecycle, in_umbrella: true},
-      {:query_boards, in_umbrella: true}
+      {:query_boards, in_umbrella: true},
+      {:track_presence, in_umbrella: true}
     ]
   end
 end

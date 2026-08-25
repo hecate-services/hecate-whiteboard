@@ -20,9 +20,11 @@ defmodule HecateWhiteboardWeb.BoardLive do
   alias GuideBoardLifecycle.BoardStatus
   alias GuideBoardLifecycle.DrawStroke.MaybeDrawStroke
   alias GuideBoardLifecycle.HostBoard.MaybeHostBoard
+  alias GuideBoardLifecycle.LeaveBoard.MaybeLeaveBoard
   alias GuideBoardLifecycle.RenameBoard.MaybeRenameBoard
   alias QueryBoards.GetBoardSnapshotById.GetBoardSnapshotById
   alias QueryBoards.GetBoardSnapshotByIdOverMesh.GetBoardSnapshotByIdOverMesh
+  alias TrackPresence.Roster
 
   # One default board for this walking-skeleton phase -- board creation
   # UX (multiple boards, a picker) is out of scope here; this proves
@@ -66,13 +68,31 @@ defmodule HecateWhiteboardWeb.BoardLive do
       Phoenix.PubSub.subscribe(HecateWhiteboardWeb.PubSub, "board:" <> board_id)
     end
 
-    socket
-    |> assign(board_id: board_id, page_title: "hecate-whiteboard")
-    |> assign(host_label: host_label())
-    |> assign(stroke_count: length(shapes))
-    |> assign(editing_title?: false)
-    |> assign_board_status(board)
-    |> push_event("shapes:snapshot", %{shapes: shapes})
+    peer_id = new_peer_id()
+    label = host_label()
+
+    socket =
+      socket
+      |> assign(board_id: board_id, page_title: "hecate-whiteboard")
+      |> assign(host_label: label)
+      |> assign(peer_id: peer_id, peer_color: presence_color(peer_id), peer_label: label)
+      |> assign(stroke_count: length(shapes))
+      |> assign(editing_title?: false)
+      |> assign_board_status(board)
+      |> push_event("shapes:snapshot", %{shapes: shapes})
+
+    # Late-join snapshot for presence, same idea as shapes:snapshot above:
+    # a joining viewer sees everyone already-settled immediately, rather
+    # than waiting for each of their next pointer pause. Excludes this
+    # peer's own (not-yet-registered) row -- nothing to exclude yet, but
+    # future-safe if this LiveView process is ever re-mounted onto the
+    # same peer_id.
+    cursors =
+      board_id
+      |> Roster.list_for_board()
+      |> Enum.reject(&(&1.peer_id == peer_id))
+
+    push_event(socket, "cursor:snapshot", %{cursors: cursors})
   end
 
   @impl true
@@ -125,6 +145,24 @@ defmodule HecateWhiteboardWeb.BoardLive do
   def handle_event("rename", _params, socket),
     do: {:noreply, assign(socket, editing_title?: false)}
 
+  # Sent by the JS hook only after ~400ms of no pointer movement (see
+  # board_canvas_hook.js) -- this handler never sees raw high-frequency
+  # movement, so no server-side throttling is needed on top of the
+  # client's own debounce. Fires regardless of can_draw? -- a view-only
+  # peer's cursor is still worth showing to collaborators.
+  def handle_event("cursor:settle", %{"x" => x, "y" => y}, socket) do
+    Roster.touch(%{
+      board_id: socket.assigns.board_id,
+      peer_id: socket.assigns.peer_id,
+      x: x,
+      y: y,
+      color: socket.assigns.peer_color,
+      label: socket.assigns.peer_label
+    })
+
+    {:noreply, socket}
+  end
+
   @impl true
   def handle_info({:board_updated, board}, socket),
     do: {:noreply, assign_board_status(socket, board)}
@@ -136,6 +174,48 @@ defmodule HecateWhiteboardWeb.BoardLive do
       |> push_event("shapes:append", stroke)
 
     {:noreply, socket}
+  end
+
+  # Never echo a peer's own settled/left cursor back to itself -- this
+  # process is both the origin and, via the same board:<id> PubSub topic
+  # every viewer subscribes to, a recipient of its own broadcast.
+  def handle_info({:cursor_settled, %{peer_id: peer_id}}, %{assigns: %{peer_id: peer_id}} = s),
+    do: {:noreply, s}
+
+  def handle_info({:cursor_settled, cursor}, socket),
+    do: {:noreply, push_event(socket, "cursor:update", cursor)}
+
+  def handle_info({:cursor_left, peer_id}, %{assigns: %{peer_id: peer_id}} = socket),
+    do: {:noreply, socket}
+
+  def handle_info({:cursor_left, peer_id}, socket),
+    do: {:noreply, push_event(socket, "cursor:remove", %{peer_id: peer_id})}
+
+  # Graceful exit only -- guarded on connected?(socket) because terminate/2
+  # also fires for the disconnected static-render pass every mount does
+  # first (see render_board), which never touched the roster or dispatched
+  # anything presence-related in the first place. An UNgraceful exit
+  # (network drop, browser crash) never reaches this at all; Roster.sweep/1
+  # is what ages those out, deliberately without an event-store write --
+  # see plans/PLAN_HECATE_WHITEBOARD_ROOT.md's "Presence is not
+  # event-sourced" decision for why that split is intentional.
+  @impl true
+  def terminate(_reason, socket) do
+    if connected?(socket) do
+      board_id = socket.assigns.board_id
+      peer_id = socket.assigns.peer_id
+      params = %{board_id: board_id, peer_id: peer_id}
+
+      Roster.remove(board_id, peer_id)
+
+      if socket.assigns.hosted? do
+        MaybeLeaveBoard.dispatch(params)
+      else
+        MaybeLeaveBoard.relay(params)
+      end
+    end
+
+    :ok
   end
 
   defp assign_board_status(socket, board) do
@@ -222,6 +302,24 @@ defmodule HecateWhiteboardWeb.BoardLive do
     )
 
     Map.put(board, :status, :evoq_bit_flags.set(0, BoardStatus.initiated()))
+  end
+
+  # Fresh per LiveView mount, not tied to any account -- presence is
+  # anonymous ephemeral session state (see TrackPresence.Roster's own
+  # header), a browser refresh is simply a new peer as far as the roster
+  # is concerned. This is also what makes a replayed peer_departed_v1
+  # from evoq's catchup-on-restart harmless: a reconnecting peer always
+  # gets a NEW peer_id, so a stale departure can never collide with a
+  # live one -- see PeerDepartedV1ToMesh's own comment.
+  defp new_peer_id, do: Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
+
+  # Deterministic hash -> HSL so the same peer_id always renders the same
+  # color for the lifetime of one session, with no accounts/auth
+  # involved. Fixed saturation/lightness keeps every color readable
+  # against the chalk-on-slate canvas regardless of hue.
+  defp presence_color(peer_id) do
+    <<hue::16, _rest::binary>> = :crypto.hash(:md5, peer_id)
+    "hsl(#{rem(hue, 360)}, 70%, 65%)"
   end
 
   defp host_label do

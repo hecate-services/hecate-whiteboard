@@ -205,6 +205,58 @@ a.brand:hover {
   pointer-events: none;
 }
 
+.cursors-layer {
+  overflow: hidden;
+}
+
+.cursor-marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(var(--cx), var(--cy));
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.cursor-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--peer-color);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
+}
+
+.cursor-label {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--peer-color);
+  color: var(--slate-deep);
+  white-space: nowrap;
+}
+
+/* The old position's marker, left behind on a jump and faded out --
+   never moved itself, only ever fading in place. See board_canvas_hook.js's
+   updateCursor for why this reads as motion without a continuous glide
+   (deliberate: a live cursor only reports a SETTLED position, debounced
+   on the sending side, so nothing here should imply it knows the path
+   the real pointer took to get there). */
+.cursor-ghost {
+  opacity: 0.55;
+  transition:
+    opacity 550ms ease-out,
+    transform 550ms ease-out;
+}
+
+.cursor-ghost-fade {
+  opacity: 0;
+  transform: translate(var(--cx), var(--cy)) scale(0.5);
+}
+
 .empty-state {
   position: absolute;
   inset: 0;

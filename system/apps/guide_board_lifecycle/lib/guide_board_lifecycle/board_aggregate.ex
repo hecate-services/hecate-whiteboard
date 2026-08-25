@@ -10,6 +10,7 @@ defmodule GuideBoardLifecycle.BoardAggregate do
   alias GuideBoardLifecycle.DrawStroke.MaybeDrawStroke
   alias GuideBoardLifecycle.HostBoard.MaybeHostBoard
   alias GuideBoardLifecycle.InitiateBoard.MaybeInitiateBoard
+  alias GuideBoardLifecycle.LeaveBoard.MaybeLeaveBoard
   alias GuideBoardLifecycle.RenameBoard.MaybeRenameBoard
 
   @impl true
@@ -63,6 +64,17 @@ defmodule GuideBoardLifecycle.BoardAggregate do
       :evoq_bit_flags.has_not(status, BoardStatus.hosted()) -> {:error, :not_hosted}
       :evoq_bit_flags.has(status, BoardStatus.archived()) -> {:error, :archived}
       true -> MaybeDrawStroke.handle_from_map(payload)
+    end
+  end
+
+  # No archived guard, unlike the other desks -- leaving is a read-only
+  # audit fact, never a content mutation, so it stays valid even on an
+  # archived board.
+  defp do_execute(:leave_board, status, payload) do
+    if :evoq_bit_flags.has_not(status, BoardStatus.hosted()) do
+      {:error, :not_hosted}
+    else
+      MaybeLeaveBoard.handle_from_map(payload)
     end
   end
 

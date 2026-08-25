@@ -79,6 +79,18 @@ Versioning: [SemVer](https://semver.org/).
   two peers sharing a relay. The topbar now shows which station each
   peer is on (`"beam01 via de-falkenstein"`), read live from
   `MACULA_STATION_SEEDS`.
+- Presence and live cursors: mesh-wide, debounced-on-stop (~400ms of
+  stillness before a settled position is sent, not a continuous
+  stream), rendered as a hard jump plus a brief fading ghost at the old
+  position. New `track_presence` app (ETS roster + sweep, no event
+  store -- ephemeral by design) and a new `leave_board` CMD desk
+  (`guide_board_lifecycle`) for the one presence fact that IS
+  event-sourced: a graceful exit. Anonymous per-mount identity, colored
+  and labeled with the same "{host} via {station}" string the topbar
+  shows. Live-verified locally with real browser automation (two tabs,
+  settle/jump/ghost/departure all confirmed), then confirmed the
+  previous entry's header-label change was already live on all three
+  deployed nodes via watchtower/podman-auto-update.
 
 ### Fixed
 

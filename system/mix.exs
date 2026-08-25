@@ -27,6 +27,7 @@ defmodule HecateWhiteboardUmbrella.MixProject do
           guide_board_lifecycle: :permanent,
           project_boards: :permanent,
           query_boards: :permanent,
+          track_presence: :permanent,
           hecate_whiteboard_web: :permanent
         ]
       ]

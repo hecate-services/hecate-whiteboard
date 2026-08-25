@@ -809,6 +809,72 @@ on newly-created boards -- deliberately left alone, unrelated to this
 display and changing it would alter stored board data for no reason
 the user asked for.
 
+### Presence and live cursors — DONE 2026-08-25
+
+The last piece this doc's own "Architecture decisions" section scoped
+but never built. Followed the locked-in design exactly (see "Presence
+is not event-sourced" above): a new support app, `track_presence`, not
+CMD/PRJ/QRY, no event store involvement for the ephemeral part.
+
+**Scope, decided with the user before writing any code** (two
+AskUserQuestion rounds -- this was genuinely a fork with real bandwidth
+implications, not a call to make alone): cursors are mesh-wide, not
+scoped to a single node's viewers, and a moving cursor is
+debounced-on-stop (~400ms of stillness before this browser tells the
+server where it settled) rather than streamed continuously -- a
+fast-moving pointer produces zero mesh traffic, only its resting points
+do. Visually, a settle is a hard jump to the new position with the old
+marker left behind as a ~550ms fading ghost (`.cursor-ghost` /
+`.cursor-ghost-fade` in app.css), so motion between two rests doesn't
+read as dead without implying the renderer knows the path the real
+pointer took.
+
+**`TrackPresence.Roster`**: ETS `{board_id, peer_id} -> %{x, y, color,
+label, last_seen}`. `touch/1` (local origin) writes + broadcasts
+locally (`HecateWhiteboardWeb.PubSub`, same `"board:" <> board_id`
+topic shapes already use) + publishes to mesh; `absorb_remote/1` (mesh
+origin) writes + broadcasts locally only -- same asymmetry
+BoardMeshSubscriber uses for strokes, and for the same reason: it's
+what keeps this loop-free. `TrackPresence.Sweep` ages out rows
+untouched for >20s every 5s, independently on every node, so an
+ungraceful disconnect (network drop, crash) needs no cross-node
+coordination to self-heal.
+
+**`leave_board`** (new CMD desk, `guide_board_lifecycle`): the one
+presence fact that IS event-sourced, per the original design decision.
+Mirrors `rename_board`'s command/event/handler shape and `draw_stroke`'s
+write-relay shape (dispatch locally if hosted, else relay over mesh to
+whoever actually hosts the board) -- but deliberately has NO archived
+guard, unlike every other desk: leaving doesn't mutate board content,
+so it stays valid even on an archived board. `PeerDepartedV1ToMesh`
+republishes it so every peer clears that cursor immediately instead of
+waiting out Sweep's timeout. Called from `BoardLive.terminate/2`,
+guarded on `connected?(socket)` -- terminate/2 also fires for the
+disconnected static-render pass every mount does first, which never
+touched presence at all.
+
+Identity is anonymous and ephemeral, matching "presence is ephemeral
+session state" -- a random peer_id per LiveView mount (a refresh is a
+new peer, not a reconnect), a deterministic peer_id-hash color, and the
+label reuses `host_label()` (the same "{host} via {station}" string the
+topbar now shows, see the section above), so a cursor's tag tells you
+which physical peer it's coming from for free.
+
+**Live-verified locally first** (`mix phx.server`, real browser
+automation, two tabs on the same board): moved the pointer in tab 2,
+confirmed tab 1 rendered a labeled cursor at the settled position after
+the debounce; moved again and caught both the new marker and the old
+one's fade-out ghost in the same screenshot; closed tab 2 and confirmed
+the cursor disappeared via the graceful-leave path. **Then confirmed
+the header-label change (previous section) was already live on all
+three deployed nodes** without a separate redeploy step -- watchtower
+had already rolled beam01/beam02 to that commit's image before this
+session got to checking (`curl .../` on each showed "beam01 via
+de-falkenstein", "beam02 via fi-helsinki", "msi00 via it-milan"
+respectively), confirming task ordering doesn't have to block on manual
+redeploy checks when watchtower/podman-auto-update are already doing
+their job.
+
 ---
 
 ## Nothing is committed anywhere

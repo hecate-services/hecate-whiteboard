@@ -44,10 +44,17 @@ function drawStroke(ctx, stroke) {
   ctx.restore();
 }
 
+// How long a peer's pointer must sit still before this browser tells the
+// server where it settled -- see TrackPresence.Roster's own header for
+// why this is a debounce-on-stop, not a continuous stream: a fast-moving
+// cursor produces ZERO mesh traffic, only its resting points do.
+const CURSOR_SETTLE_MS = 400;
+
 export const BoardCanvas = {
   mounted() {
     this.committed = this.el.querySelector("#board-canvas-committed");
     this.pending = this.el.querySelector("#board-canvas-pending");
+    this.cursorsLayer = this.el.querySelector("#board-canvas-cursors");
     this.emptyState = document.getElementById("board-empty-state");
     this.canDraw = this.el.dataset.canDraw === "true";
     this.color = "#f2efe6";
@@ -55,12 +62,15 @@ export const BoardCanvas = {
     this.points = [];
     this.drawing = false;
     this.shapes = []; // every confirmed stroke, kept so a resize can redraw the layer instead of losing it
+    this.cursors = new Map(); // peer_id -> {el, x, y}
+    this.settleTimer = null;
 
     this.resize();
     window.addEventListener("resize", () => this.resize());
 
     this.wireToolbar();
     this.wirePointerEvents();
+    this.wireCursorTracking();
 
     this.handleEvent("shapes:snapshot", ({ shapes }) => {
       shapes.forEach((s) => this.renderCommitted(s));
@@ -71,6 +81,14 @@ export const BoardCanvas = {
       this.renderCommitted(stroke);
       this.updateEmptyState(true);
     });
+
+    this.handleEvent("cursor:snapshot", ({ cursors }) => {
+      cursors.forEach((c) => this.updateCursor(c, /* instant */ true));
+    });
+
+    this.handleEvent("cursor:update", (cursor) => this.updateCursor(cursor, false));
+
+    this.handleEvent("cursor:remove", ({ peer_id }) => this.removeCursor(peer_id));
   },
 
   resize() {
@@ -107,6 +125,25 @@ export const BoardCanvas = {
     canvas.addEventListener("pointerdown", (e) => this.startStroke(e));
     canvas.addEventListener("pointermove", (e) => this.extendStroke(e));
     window.addEventListener("pointerup", () => this.finishStroke());
+  },
+
+  // Runs regardless of canDraw -- a view-only peer's cursor is still
+  // worth showing to collaborators. Attached to the outer wrap (not
+  // `this.pending`, which only accepts pointer events when drawing is
+  // allowed -- see wirePointerEvents above): pointermove bubbles up from
+  // whichever layer the pointer is actually over, so this still fires
+  // either way. See CURSOR_SETTLE_MS's own comment for why this debounces
+  // instead of streaming.
+  wireCursorTracking() {
+    this.el.addEventListener("pointermove", (e) => {
+      const p = this.point(e);
+      clearTimeout(this.settleTimer);
+      this.settleTimer = setTimeout(() => {
+        this.pushEvent("cursor:settle", { x: p.x, y: p.y });
+      }, CURSOR_SETTLE_MS);
+    });
+
+    this.el.addEventListener("pointerleave", () => clearTimeout(this.settleTimer));
   },
 
   point(e) {
@@ -148,5 +185,65 @@ export const BoardCanvas = {
 
   updateEmptyState(hasShapes) {
     if (this.emptyState) this.emptyState.style.display = hasShapes ? "none" : "flex";
+  },
+
+  // instant=true (the late-join snapshot only) places a marker with no
+  // ghost left behind -- there's no "previous position" to fade from,
+  // this peer simply wasn't visible a moment ago.
+  updateCursor({ peer_id, x, y, color, label }, instant) {
+    const existing = this.cursors.get(peer_id);
+    if (existing && !instant) this.spawnGhost(existing);
+
+    const el = existing ? existing.el : this.createCursorEl();
+    if (!this.cursorsLayer.contains(el)) this.cursorsLayer.appendChild(el);
+
+    el.style.setProperty("--cx", x + "px");
+    el.style.setProperty("--cy", y + "px");
+    el.style.setProperty("--peer-color", color);
+    el.querySelector(".cursor-label").textContent = label;
+
+    this.cursors.set(peer_id, { el, x, y, color, label });
+  },
+
+  removeCursor(peer_id) {
+    const existing = this.cursors.get(peer_id);
+    if (!existing) return;
+    this.spawnGhost(existing);
+    existing.el.remove();
+    this.cursors.delete(peer_id);
+  },
+
+  createCursorEl() {
+    const el = document.createElement("div");
+    el.className = "cursor-marker";
+
+    const dot = document.createElement("span");
+    dot.className = "cursor-dot";
+    el.appendChild(dot);
+
+    const tag = document.createElement("span");
+    tag.className = "cursor-label";
+    el.appendChild(tag);
+
+    return el;
+  },
+
+  // The old position, left behind to fade -- see .cursor-ghost's own CSS
+  // comment for why this reads as motion without a continuous glide.
+  spawnGhost({ x, y, color, label }) {
+    const ghost = this.createCursorEl();
+    ghost.classList.add("cursor-ghost");
+    ghost.style.setProperty("--cx", x + "px");
+    ghost.style.setProperty("--cy", y + "px");
+    ghost.style.setProperty("--peer-color", color);
+    ghost.querySelector(".cursor-label").textContent = label;
+    this.cursorsLayer.appendChild(ghost);
+
+    requestAnimationFrame(() => ghost.classList.add("cursor-ghost-fade"));
+    setTimeout(() => ghost.remove(), 650);
+  },
+
+  destroyed() {
+    clearTimeout(this.settleTimer);
   },
 };
