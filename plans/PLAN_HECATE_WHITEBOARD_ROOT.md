@@ -5,11 +5,13 @@
 (`hecate_whiteboard_web`) are built and verified end to end locally,
 including inside the actual compiled container image (draw → reload →
 strokes persist via the snapshot query; multiple colors; the release's
-own Bandit endpoint, not just `mix phx.server`). Committed and pushed
-(`be2da6d`); CI in flight at time of writing. Visual design: a
-chalk-on-slate canvas (warm charcoal, chalk-white ink, one amber accent),
-host/peer status made visible rather than hidden. Not yet redeployed to
-beam01/beam02 -- see "Suggested build order" for what comes after.
+own Bandit endpoint, not just `mix phx.server`). Committed and pushed, CI green, deployed and verified live on both
+`beam01.lab` (`http://beam01.lab:8493/`) and `beam02.lab`
+(`http://beam02.lab:8493/`) -- watchtower + the pull-based reconciler
+picked up the new image and config automatically, no manual redeploy
+step needed. Visual design: a chalk-on-slate canvas (warm charcoal,
+chalk-white ink, one amber accent), host/peer status made visible
+rather than hidden. See "Suggested build order" for what comes after.
 
 **Previously (walking skeleton), for reference:** Repo:
 `github.com/hecate-services/hecate-whiteboard` (public). CI green
