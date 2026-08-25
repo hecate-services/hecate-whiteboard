@@ -26,13 +26,13 @@ defmodule ProjectBoards.BoardMeshSubscriber do
   @impl true
   def handle_event(@topic, payload, _meta, state) when is_map(payload) do
     fact = normalize(payload)
-    board_id = fact["board_id"]
+    board_id = field(:board_id, fact)
 
     stroke = %{
-      stroke_id: fact["stroke_id"],
-      points: fact["points"],
-      color: fact["color"],
-      width: fact["width"]
+      stroke_id: field(:stroke_id, fact),
+      points: field(:points, fact),
+      color: field(:color, fact),
+      width: field(:width, fact)
     }
 
     :ets.insert(ProjectBoards.Store.board_shapes_table(), {board_id, stroke})
@@ -48,12 +48,28 @@ defmodule ProjectBoards.BoardMeshSubscriber do
 
   def handle_event(_topic, _payload, _meta, state), do: {:noreply, state}
 
-  # Pubsub payloads decode with CBOR text-strings tagged {:text, bin} at
-  # any depth, not plain binaries -- see
-  # reference_hecate_om_service_charlist_paths's sibling gotcha,
-  # reference_macula_rpc_stream_args_atom_keys's pubsub cousin, and
-  # macula-realm's own Tube.Cbor.normalize/1 (same fix, independently
-  # confirmed necessary here).
+  # Field keys arrive as plain ATOMS whenever this VM already has the
+  # atom loaded (which it does -- this module's own struct-free maps use
+  # the same field names), same "atomize if known, else {text, Bin}"
+  # mechanism reference_macula_rpc_stream_args_atom_keys documented for
+  # macula's RPC/stream path -- confirmed live 2026-08-25 that macula
+  # 10.1.1 does the SAME thing for plain pubsub delivery too, not just
+  # RPC/streaming as that memory originally scoped it. The older,
+  # narrower assumption (pubsub payloads always arrive {text, Bin}-tagged,
+  # per erlang_macula_sdk_payload_keys and macula-realm's Tube.Cbor) is
+  # what actually crashed here first: `fact["board_id"]` against an
+  # atom-keyed map returned nil, then `"board:" <> nil` raised
+  # ArgumentError deep in Phoenix.PubSub.broadcast/3. Tolerating both
+  # shapes (plus the {text, Bin} case normalize/1 still handles, for
+  # whichever atoms this VM does NOT already have loaded) is the correct
+  # fix, not picking one.
+  defp field(key, map) when is_atom(key) do
+    Map.get(map, key, Map.get(map, Atom.to_string(key)))
+  end
+
+  # Pubsub payloads can still carry CBOR text-strings tagged {:text, bin}
+  # for any key/atom this VM doesn't already have loaded -- see the
+  # field/2 comment above for the full picture.
   defp normalize({:text, b}) when is_binary(b), do: b
   defp normalize(:undefined), do: nil
   defp normalize(m) when is_map(m), do: Map.new(m, fn {k, v} -> {normalize(k), normalize(v)} end)
