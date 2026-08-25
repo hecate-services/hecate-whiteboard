@@ -40,7 +40,10 @@ jobs:
           path: |
             system/deps
             system/_build
-          key: ${{ runner.os }}-mix-${{ hashFiles('system/mix.lock') }}
+          # No mix.lock in this repo (this workspace never commits lock
+          # files) -- key off the manifests instead. Deps still resolve
+          # fresh against the live registry every run either way.
+          key: ${{ runner.os }}-mix-${{ hashFiles('system/**/mix.exs') }}
 
       - working-directory: system
         run: mix deps.get

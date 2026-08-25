@@ -32,9 +32,13 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 
 ENV MIX_ENV=prod
 
-# Dependencies resolve from mix.exs/mix.lock alone, so this layer survives
-# every change to config/ and apps/*/lib.
-COPY mix.exs mix.lock ./
+# No mix.lock, deliberately -- this workspace never commits lock files
+# (the manifest is the single source of truth, a tracked lock becomes a
+# silent version ceiling deps.get never advances past on its own). Every
+# build resolves fresh against the live registry. Dependencies resolve
+# from mix.exs alone, so this layer survives every change to config/ and
+# apps/*/lib.
+COPY mix.exs ./
 COPY apps/hecate_whiteboard/mix.exs ./apps/hecate_whiteboard/
 COPY apps/guide_board_lifecycle/mix.exs ./apps/guide_board_lifecycle/
 RUN mix deps.get --only prod
