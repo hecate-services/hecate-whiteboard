@@ -53,7 +53,7 @@ mix format --check-formatted
 
 Container image: `ghcr.io/hecate-services/hecate-whiteboard`. Built and
 pushed by `.github/workflows/build-push.yml` on every push to `main`.
-Deployed to the beam fleet (`beam00.lab`, `beam01.lab`) via
+Deployed to the beam fleet (`beam01.lab`, `beam02.lab`) via
 `macula-io/macula-demo`'s pull-based reconciler -- see that repo's
 `infrastructure/DEPLOY_BEAM.md` and this repo's own plan doc for why
 those two nodes.

@@ -4,10 +4,12 @@
 `github.com/hecate-services/hecate-whiteboard` (public). CI green
 (`build-push.yml`, `lint.yml`), image published to
 `ghcr.io/hecate-services/hecate-whiteboard:latest`. Deployed to
-`beam00.lab` + `beam01.lab` via `macula-io/macula-demo`'s pull-based
-reconciler (commit `49f74eb`) — secret enrollment (`HECATE_REALM`) is the
-one step done out of band, see that repo's
-`infrastructure/scripts/enroll-hecate-whiteboard-secret.sh`. All three
+`beam01.lab` + `beam02.lab` via `macula-io/macula-demo`'s pull-based
+reconciler (commit `857aaad`, retargeted from an original beam00 pick
+after finding beam00's own `hecate-reconcile.timer` stuck since
+2026-08-24 — separate pre-existing issue, not fixed here). Secret
+enrollment (`HECATE_REALM`) is the one step done out of band, see that
+repo's `infrastructure/scripts/enroll-hecate-whiteboard-secret.sh`. All three
 risks in "Risks / open verification items" below are resolved; see that
 section for what was actually found. Next: `host_board` + a bare LiveView
 page per the "Suggested build order" section.
