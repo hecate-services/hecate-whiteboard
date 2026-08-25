@@ -29,6 +29,13 @@
               <span class="mono">{board.owner}</span>
               <span class="status-sep">·</span>
               {board.stroke_count} {if board.stroke_count == 1, do: "stroke", else: "strokes"}
+              <span class="status-sep">·</span>
+              <span
+                class="board-card-badge board-card-badge-hosted"
+                title="This node hosts this board directly."
+              >
+                hosted here
+              </span>
             </span>
           </a>
         </li>
@@ -56,7 +63,12 @@
               <span class="board-card-meta">
                 <span class="mono">{board.host}</span>
                 <span class="status-sep">·</span>
-                view only
+                <span
+                  class="board-card-badge"
+                  title="Hosted elsewhere. Opens here; drawing relays to the host over the mesh."
+                >
+                  relay
+                </span>
               </span>
             </a>
             <div :if={!hosted?(board.status)} class="board-card-pending">
@@ -64,7 +76,12 @@
               <span class="board-card-meta">
                 <span class="mono">{board.host}</span>
                 <span class="status-sep">·</span>
-                <span class="board-card-badge">initiated</span>
+                <span
+                  class="board-card-badge"
+                  title="Created but not yet open for editing anywhere."
+                >
+                  initiated
+                </span>
               </span>
             </div>
           </li>

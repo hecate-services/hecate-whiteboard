@@ -689,6 +689,11 @@ a.brand:hover {
   border: 1px solid var(--slate-line);
 }
 
+.board-card-badge-hosted {
+  color: var(--amber);
+  border-color: var(--amber-soft);
+}
+
 .board-card-title {
   font-weight: 500;
   overflow: hidden;

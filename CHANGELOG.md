@@ -134,6 +134,15 @@ Versioning: [SemVer](https://semver.org/).
   `ListHostedBoards`' own "hosted AND NOT archived" filter. Users no
   longer need to reload `/boards` to see a board a peer just created.
 
+- Board picker badges: a locally-hosted board now shows an amber "hosted
+  here" badge (matching the `dot-live` amber used everywhere else for
+  "this node is the host"). Replaced the remote-board list's "view
+  only" text with a "relay" badge — "view only" had gone stale the
+  moment write-relay shipped (a remote board is genuinely drawable,
+  just relayed to the host over the mesh), so it was actively
+  misleading rather than just imprecise. Each badge carries a `title`
+  tooltip spelling out what it actually means.
+
 ### Fixed
 
 - Collapsing the toolbox side pane silently broke every subsequent
