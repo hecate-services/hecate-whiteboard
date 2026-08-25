@@ -17,5 +17,9 @@ defmodule HecateWhiteboardWeb.Router do
     pipe_through(:browser)
 
     live("/", BoardLive)
+    # join_board: a specific board_id, not necessarily hosted on THIS
+    # node -- BoardLive's mount/3 tells the two apart. "/" keeps its
+    # existing behaviour (the fixed default board, auto-hosted) untouched.
+    live("/board/:board_id", BoardLive)
   end
 end

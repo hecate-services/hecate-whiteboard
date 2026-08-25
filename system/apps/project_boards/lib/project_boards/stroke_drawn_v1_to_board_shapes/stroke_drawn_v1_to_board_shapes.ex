@@ -32,6 +32,10 @@ defmodule ProjectBoards.StrokeDrawnV1ToBoardShapes.StrokeDrawnV1ToBoardShapes do
       }
 
       :ets.insert(Store.board_shapes_table(), {board_id, stroke})
+      # `version` is on the wrapped event itself, not under `data` -- see
+      # "Event shape on the wire" in the plan doc. Feeds join_board's
+      # as_of_version (Store's own module doc explains why).
+      Store.note_stroke_version(board_id, field(:version, event))
 
       Phoenix.PubSub.broadcast(
         HecateWhiteboardWeb.PubSub,

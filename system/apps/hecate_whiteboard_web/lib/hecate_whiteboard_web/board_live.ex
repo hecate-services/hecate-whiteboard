@@ -11,6 +11,7 @@ defmodule HecateWhiteboardWeb.BoardLive do
   alias GuideBoardLifecycle.DrawStroke.MaybeDrawStroke
   alias GuideBoardLifecycle.HostBoard.MaybeHostBoard
   alias QueryBoards.GetBoardSnapshotById.GetBoardSnapshotById
+  alias QueryBoards.GetBoardSnapshotByIdOverMesh.GetBoardSnapshotByIdOverMesh
 
   # One default board for this walking-skeleton phase -- board creation
   # UX (multiple boards, a picker) is out of scope here; this proves
@@ -25,23 +26,41 @@ defmodule HecateWhiteboardWeb.BoardLive do
   # across restarts.
   @default_board_id "board-01a038649f9470078c0e2afaaaaea200"
 
+  # join_board: a specific board_id from the URL, not necessarily hosted
+  # on this node. Tries the local read model first (covers: this node IS
+  # the host, or already joined this board_id once before) and only asks
+  # the mesh when that comes back empty -- see
+  # GetBoardSnapshotByIdOverMesh's own header for the discovery protocol
+  # and why the two mount clauses can return an identical snapshot shape.
+  # A board nobody on the mesh answers for redirects to the default board
+  # rather than stranding the visitor on a dead page.
   @impl true
+  def mount(%{"board_id" => board_id}, _session, socket) do
+    case find_or_join_board(board_id) do
+      {:ok, %{board: board, shapes: shapes}} ->
+        {:ok, render_board(socket, board_id, board, shapes)}
+
+      {:error, _reason} ->
+        {:ok, redirect(socket, to: "/")}
+    end
+  end
+
   def mount(_params, _session, socket) do
     {:ok, %{board: board, shapes: shapes}} = find_or_host_default_board()
+    {:ok, render_board(socket, @default_board_id, board, shapes)}
+  end
 
+  defp render_board(socket, board_id, board, shapes) do
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(HecateWhiteboardWeb.PubSub, "board:" <> @default_board_id)
+      Phoenix.PubSub.subscribe(HecateWhiteboardWeb.PubSub, "board:" <> board_id)
     end
 
-    socket =
-      socket
-      |> assign(board_id: @default_board_id, page_title: "hecate-whiteboard")
-      |> assign(host_label: host_label())
-      |> assign(stroke_count: length(shapes))
-      |> assign_board_status(board)
-      |> push_event("shapes:snapshot", %{shapes: shapes})
-
-    {:ok, socket}
+    socket
+    |> assign(board_id: board_id, page_title: "hecate-whiteboard")
+    |> assign(host_label: host_label())
+    |> assign(stroke_count: length(shapes))
+    |> assign_board_status(board)
+    |> push_event("shapes:snapshot", %{shapes: shapes})
   end
 
   @impl true
@@ -94,6 +113,13 @@ defmodule HecateWhiteboardWeb.BoardLive do
 
       {:error, :not_found} ->
         {:ok, %{board: ensure_hosted(initiate_default_board()), shapes: []}}
+    end
+  end
+
+  defp find_or_join_board(board_id) do
+    case GetBoardSnapshotById.call(board_id) do
+      {:ok, snapshot} -> {:ok, snapshot}
+      {:error, :not_found} -> GetBoardSnapshotByIdOverMesh.call(board_id)
     end
   end
 

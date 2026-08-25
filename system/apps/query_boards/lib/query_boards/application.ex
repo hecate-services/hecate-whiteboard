@@ -1,6 +1,9 @@
 defmodule QueryBoards.Application do
-  # See https://hexdocs.pm/elixir/Application.html
-  # for more information on OTP Applications
+  # AnswerBoardSnapshotQueriesStarter is join_board's host-side responder
+  # (see that module) -- everything else this app exposes is a plain
+  # function call (GetBoardSnapshotById, ListHostedBoards), no process
+  # needed. Mirrors ProjectBoards.Supervisor's DynamicSupervisor +
+  # Starter shape exactly.
   @moduledoc false
 
   use Application
@@ -8,13 +11,10 @@ defmodule QueryBoards.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      # Starts a worker by calling: QueryBoards.Worker.start_link(arg)
-      # {QueryBoards.Worker, arg}
+      {DynamicSupervisor, name: QueryBoards.MeshSubscriberSupervisor, strategy: :one_for_one},
+      QueryBoards.AnswerBoardSnapshotQueriesStarter
     ]
 
-    # See https://hexdocs.pm/elixir/Supervisor.html
-    # for other strategies and supported options
-    opts = [strategy: :one_for_one, name: QueryBoards.Supervisor]
-    Supervisor.start_link(children, opts)
+    Supervisor.start_link(children, strategy: :one_for_one, name: QueryBoards.Supervisor)
   end
 end
