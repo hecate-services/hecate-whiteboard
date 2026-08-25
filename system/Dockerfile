@@ -43,6 +43,7 @@ COPY apps/hecate_whiteboard/mix.exs ./apps/hecate_whiteboard/
 COPY apps/guide_board_lifecycle/mix.exs ./apps/guide_board_lifecycle/
 COPY apps/project_boards/mix.exs ./apps/project_boards/
 COPY apps/query_boards/mix.exs ./apps/query_boards/
+COPY apps/track_presence/mix.exs ./apps/track_presence/
 COPY apps/hecate_whiteboard_web/mix.exs ./apps/hecate_whiteboard_web/
 RUN mix deps.get --only prod
 RUN mix deps.compile
