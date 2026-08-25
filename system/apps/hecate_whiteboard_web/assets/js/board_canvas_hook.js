@@ -174,6 +174,22 @@ const CURSOR_BY_TOOL = {
 // cursor produces ZERO mesh traffic, only its resting points do.
 const CURSOR_SETTLE_MS = 400;
 
+// Camera: every stored/transmitted point (strokes, shapes, cursors) is
+// in WORLD space, independent of any one viewer's window size or zoom
+// level -- the camera (pan offset + zoom factor) is purely local,
+// client-side, never sent anywhere. Before this, a point was literally
+// "pixels from the canvas's top-left at draw time" (camera was
+// implicitly identity), so old boards need no migration: their stored
+// coordinates are indistinguishable from world coordinates recorded
+// under an identity camera.
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 4;
+// Tuned so one normal mouse-wheel notch (~100 raw deltaY) or a light
+// trackpad pinch feels like a deliberate, moderate step -- not a raw
+// 1:1 mapping, which would make zoom hypersensitive on precision
+// trackpads that report large deltaY values for small gestures.
+const ZOOM_WHEEL_SENSITIVITY = 0.0015;
+
 export const BoardCanvas = {
   mounted() {
     this.committed = this.el.querySelector("#board-canvas-committed");
@@ -181,7 +197,14 @@ export const BoardCanvas = {
     this.shapesLayer = this.el.querySelector("#board-canvas-shapes");
     this.cursorsLayer = this.el.querySelector("#board-canvas-cursors");
     this.emptyState = document.getElementById("board-empty-state");
+    this.zoomIndicator = document.getElementById("board-zoom-indicator");
     this.canDraw = this.el.dataset.canDraw === "true";
+
+    // Screen = world * zoom + {x, y}. Local to this tab, never persisted
+    // or transmitted -- resets to identity on every mount, same as any
+    // infinite-canvas tool's default. See this file's own header for why
+    // NOT resetting it silently loses nothing on old boards.
+    this.camera = { x: 0, y: 0, zoom: 1 };
 
     this.activeTool = "pen"; // "pen" | "text" | "select" | "sticky" | "rectangle" | "ellipse" | "triangle"
     this.color = "#f2efe6";
@@ -212,6 +235,7 @@ export const BoardCanvas = {
     this.wireCanvasInteraction();
     this.wireCursorTracking();
     this.wireKeyboardShortcuts();
+    this.wireCameraControls();
 
     this.handleEvent("shapes:snapshot", ({ shapes }) => {
       shapes.forEach((s) => this.renderShape(s));
@@ -249,16 +273,179 @@ export const BoardCanvas = {
       canvas.height = rect.height * ratio;
       canvas.style.width = rect.width + "px";
       canvas.style.height = rect.height + "px";
-      canvas.getContext("2d").setTransform(ratio, 0, 0, ratio, 0, 0);
+      // No setTransform here -- withCamera/clearCanvas set the full
+      // transform themselves on every call, so this canvas's own
+      // persistent transform state is never relied on between draws.
     });
 
     this.redrawCommitted();
   },
 
+  // Resets to a DPR-only transform (undoing whatever any PREVIOUS draw
+  // left active) and returns the ratio, so callers can clear in
+  // CSS-pixel space before applying the camera themselves -- clearRect
+  // respects whatever transform is active when it's called, so clearing
+  // under an already-zoomed transform would only clear part of the
+  // visible canvas.
+  resetTransform(ctx) {
+    const ratio = window.devicePixelRatio || 1;
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    return ratio;
+  },
+
+  applyCameraTransform(ctx) {
+    ctx.translate(this.camera.x, this.camera.y);
+    ctx.scale(this.camera.zoom, this.camera.zoom);
+  },
+
+  // Every canvas draw goes through here, drawWithCamera, or clearCanvas
+  // -- never a raw ctx.clearRect/draw pair -- so the transform is
+  // always set fresh, never assumed left over from a previous call.
+  withCamera(canvas, drawFn) {
+    const ctx = canvas.getContext("2d");
+    ctx.save();
+    const ratio = this.resetTransform(ctx);
+    ctx.clearRect(0, 0, canvas.width / ratio, canvas.height / ratio);
+    this.applyCameraTransform(ctx);
+    drawFn(ctx);
+    ctx.restore();
+  },
+
+  // Same transform as withCamera, but does NOT clear first -- for
+  // incrementally appending ONE new shape onto committed without
+  // redrawing everything already there (renderCanvasShape).
+  drawWithCamera(canvas, drawFn) {
+    const ctx = canvas.getContext("2d");
+    ctx.save();
+    this.resetTransform(ctx);
+    this.applyCameraTransform(ctx);
+    drawFn(ctx);
+    ctx.restore();
+  },
+
+  clearCanvas(canvas) {
+    const ctx = canvas.getContext("2d");
+    ctx.save();
+    const ratio = this.resetTransform(ctx);
+    ctx.clearRect(0, 0, canvas.width / ratio, canvas.height / ratio);
+    ctx.restore();
+  },
+
   redrawCommitted() {
-    const ctx = this.committed.getContext("2d");
-    ctx.clearRect(0, 0, this.committed.width, this.committed.height);
-    this.shapes.forEach((s) => drawShape(ctx, s));
+    this.withCamera(this.committed, (ctx) => {
+      this.shapes.forEach((s) => drawShape(ctx, s));
+    });
+  },
+
+  toWorld(screenPt) {
+    return {
+      x: (screenPt.x - this.camera.x) / this.camera.zoom,
+      y: (screenPt.y - this.camera.y) / this.camera.zoom,
+    };
+  },
+
+  toScreen(worldPt) {
+    return {
+      x: worldPt.x * this.camera.zoom + this.camera.x,
+      y: worldPt.y * this.camera.zoom + this.camera.y,
+    };
+  },
+
+  // The ONE place that applies a changed camera everywhere it matters:
+  // the canvas-drawn layer (committed shapes, via redrawCommitted), the
+  // pending layer (the selection outline, if anything's selected --
+  // drawSelectionOutline is safe to call unconditionally, see its own
+  // comment), the DOM shapes layer (a plain CSS transform -- see
+  // .shapes-layer's own comment for why individual stickies/text/ghost
+  // need no changes of their own), and presence cursors (kept in screen
+  // space deliberately, so peer markers/labels stay a constant SIZE
+  // regardless of zoom instead of scaling with board content -- see
+  // repositionCursors). Does NOT touch an in-progress gesture (a live
+  // stroke/geometry-drag/move-drag) -- panning or zooming mid-gesture
+  // is not a supported combination, same as every other tool.
+  applyCamera() {
+    this.shapesLayer.style.transform = `translate(${this.camera.x}px, ${this.camera.y}px) scale(${this.camera.zoom})`;
+    this.redrawCommitted();
+    this.drawSelectionOutline();
+    this.repositionCursors();
+    this.updateZoomIndicator();
+  },
+
+  updateZoomIndicator() {
+    if (this.zoomIndicator) {
+      this.zoomIndicator.textContent = Math.round(this.camera.zoom * 100) + "%";
+    }
+  },
+
+  resetCamera() {
+    this.camera = { x: 0, y: 0, zoom: 1 };
+    this.applyCamera();
+  },
+
+  screenPoint(e) {
+    const rect = this.el.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  },
+
+  panBy(dx, dy) {
+    this.camera.x += dx;
+    this.camera.y += dy;
+    this.applyCamera();
+  },
+
+  // Zoom toward a fixed screen point (the cursor) -- the world point
+  // currently under the cursor stays under the cursor after the zoom,
+  // which is what makes zooming feel anchored rather than like the
+  // board is sliding out from under the pointer.
+  zoomAt(screenPt, rawDelta) {
+    const factor = Math.exp(-rawDelta * ZOOM_WHEEL_SENSITIVITY);
+    const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, this.camera.zoom * factor));
+    const worldPt = this.toWorld(screenPt);
+
+    this.camera.zoom = newZoom;
+    this.camera.x = screenPt.x - worldPt.x * newZoom;
+    this.camera.y = screenPt.y - worldPt.y * newZoom;
+    this.applyCamera();
+  },
+
+  // Plain scroll pans (trackpad two-finger scroll or a mouse wheel);
+  // ctrl/cmd+scroll zooms -- same convention as every other
+  // infinite-canvas tool, and the one macOS itself uses for pinch-zoom
+  // (a trackpad pinch dispatches a wheel event with ctrlKey set, even
+  // with no physical Ctrl key involved). Works regardless of canDraw --
+  // panning/zooming is a local viewing concern, not a drawing
+  // permission, so a read-only joined board is still navigable.
+  wireCameraControls() {
+    this.el.addEventListener(
+      "wheel",
+      (e) => {
+        e.preventDefault();
+        if (e.ctrlKey || e.metaKey) {
+          this.zoomAt(this.screenPoint(e), e.deltaY);
+        } else {
+          this.panBy(-e.deltaX, -e.deltaY);
+        }
+      },
+      { passive: false },
+    );
+
+    if (this.zoomIndicator) {
+      this.zoomIndicator.addEventListener("click", () => this.resetCamera());
+    }
+  },
+
+  // Cursor markers deliberately do NOT live inside the zoom-scaled
+  // shapes-layer transform -- a peer's dot/label should stay a constant
+  // SCREEN size as you zoom, like a map pin, not grow or shrink with
+  // board content. So cursors-layer stays untransformed, and each
+  // marker's screen position is computed fresh from its stored WORLD
+  // position whenever the camera changes.
+  repositionCursors() {
+    this.cursors.forEach(({ el, x, y }) => {
+      const screenPt = this.toScreen({ x, y });
+      el.style.setProperty("--cx", screenPt.x + "px");
+      el.style.setProperty("--cy", screenPt.y + "px");
+    });
   },
 
   wireInkSwatches() {
@@ -379,17 +566,17 @@ export const BoardCanvas = {
   onCanvasMove(e) {
     if (this.drawing) {
       this.points.push(this.point(e));
-      const ctx = this.pending.getContext("2d");
-      ctx.clearRect(0, 0, this.pending.width, this.pending.height);
-      drawStroke(ctx, { points: this.points, color: this.color, width: this.width });
+      this.withCamera(this.pending, (ctx) => {
+        drawStroke(ctx, { points: this.points, color: this.color, width: this.width });
+      });
       return;
     }
 
     if (this.drawingGeometry) {
       const p = this.point(e);
-      const ctx = this.pending.getContext("2d");
-      ctx.clearRect(0, 0, this.pending.width, this.pending.height);
-      drawShape(ctx, { kind: this.drawingGeometry.kind, points: [this.drawingGeometry.start, p], color: this.color });
+      this.withCamera(this.pending, (ctx) => {
+        drawShape(ctx, { kind: this.drawingGeometry.kind, points: [this.drawingGeometry.start, p], color: this.color });
+      });
       return;
     }
 
@@ -400,10 +587,10 @@ export const BoardCanvas = {
       const translated = this.moving.originalPoints.map((pt) => ({ x: pt.x + dx, y: pt.y + dy }));
       this._lastMoveTranslated = translated;
 
-      const ctx = this.pending.getContext("2d");
-      ctx.clearRect(0, 0, this.pending.width, this.pending.height);
       const shape = this.shapes.find((s) => s.shape_id === this.moving.shapeId);
-      drawShape(ctx, { ...shape, points: translated });
+      this.withCamera(this.pending, (ctx) => {
+        drawShape(ctx, { ...shape, points: translated });
+      });
       return;
     }
 
@@ -418,8 +605,7 @@ export const BoardCanvas = {
   onCanvasUp(e) {
     if (this.drawing) {
       this.drawing = false;
-      const ctx = this.pending.getContext("2d");
-      ctx.clearRect(0, 0, this.pending.width, this.pending.height);
+      this.clearCanvas(this.pending);
 
       if (this.points.length > 0) {
         this.pushEvent("stroke", { points: this.points, color: this.color, width: this.width });
@@ -430,21 +616,25 @@ export const BoardCanvas = {
 
     if (this.drawingGeometry) {
       const p = this.point(e);
-      const ctx = this.pending.getContext("2d");
-      ctx.clearRect(0, 0, this.pending.width, this.pending.height);
+      this.clearCanvas(this.pending);
 
       const { kind, start } = this.drawingGeometry;
       this.drawingGeometry = null;
 
-      if (Math.abs(p.x - start.x) >= MIN_GEOMETRY_SIZE_PX || Math.abs(p.y - start.y) >= MIN_GEOMETRY_SIZE_PX) {
+      // Divided by zoom so this reads as a fixed SCREEN-pixel intent
+      // threshold regardless of zoom level -- a fixed world-unit
+      // threshold would make a deliberate small shape nearly impossible
+      // to draw when zoomed out, or trigger on a barely-there jitter
+      // when zoomed way in.
+      const minSize = MIN_GEOMETRY_SIZE_PX / this.camera.zoom;
+      if (Math.abs(p.x - start.x) >= minSize || Math.abs(p.y - start.y) >= minSize) {
         this.pushEvent("draw_geometry", { kind, points: [start, p], color: this.color });
       }
       return;
     }
 
     if (this.moving && this.moving.kind === "canvas") {
-      const ctx = this.pending.getContext("2d");
-      ctx.clearRect(0, 0, this.pending.width, this.pending.height);
+      this.clearCanvas(this.pending);
 
       const last = this._lastMoveTranslated;
       if (last) {
@@ -585,9 +775,14 @@ export const BoardCanvas = {
     }
   },
 
+  // Every caller of point(e) wants a WORLD coordinate -- what gets
+  // stored, drawn (via withCamera, which applies the same camera), and
+  // hit-tested against. screenPoint(e) is the one place that wants the
+  // raw screen position instead (zoomAt, to keep the point under the
+  // cursor fixed).
   point(e) {
     const rect = this.pending.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    return this.toWorld({ x: e.clientX - rect.left, y: e.clientY - rect.top });
   },
 
   // Shared placement flow for sticky/text: a local, not-yet-confirmed
@@ -640,30 +835,36 @@ export const BoardCanvas = {
     });
   },
 
+  // Threshold divided by zoom, same reasoning as onCanvasUp's
+  // minSize: point (and every stored shape point) is WORLD space, so a
+  // fixed HIT_THRESHOLD_PX would feel impossibly precise when zoomed
+  // out and overly forgiving when zoomed in. Dividing keeps the
+  // effective SCREEN-pixel tolerance constant across zoom levels.
   hitTestCanvasShape(point) {
+    const threshold = HIT_THRESHOLD_PX / this.camera.zoom;
     return this.shapes.find((shape) => {
-      if (shape.kind === "stroke") return this.strokeHit(point, shape);
-      return pointInBoundingBox(point, shape.points, HIT_THRESHOLD_PX);
+      if (shape.kind === "stroke") return this.strokeHit(point, shape, threshold);
+      return pointInBoundingBox(point, shape.points, threshold);
     });
   },
 
-  strokeHit(point, stroke) {
+  strokeHit(point, stroke, threshold) {
     const box = boundingBox(stroke.points);
     if (
-      point.x < box.minX - HIT_THRESHOLD_PX ||
-      point.x > box.maxX + HIT_THRESHOLD_PX ||
-      point.y < box.minY - HIT_THRESHOLD_PX ||
-      point.y > box.maxY + HIT_THRESHOLD_PX
+      point.x < box.minX - threshold ||
+      point.x > box.maxX + threshold ||
+      point.y < box.minY - threshold ||
+      point.y > box.maxY + threshold
     ) {
       return false;
     }
 
     for (let i = 0; i < stroke.points.length - 1; i++) {
-      if (distanceToSegment(point, stroke.points[i], stroke.points[i + 1]) <= HIT_THRESHOLD_PX) {
+      if (distanceToSegment(point, stroke.points[i], stroke.points[i + 1]) <= threshold) {
         return true;
       }
     }
-    return stroke.points.length === 1 && Math.hypot(point.x - stroke.points[0].x, point.y - stroke.points[0].y) <= HIT_THRESHOLD_PX;
+    return stroke.points.length === 1 && Math.hypot(point.x - stroke.points[0].x, point.y - stroke.points[0].y) <= threshold;
   },
 
   selectShape(shapeId, kind) {
@@ -687,24 +888,27 @@ export const BoardCanvas = {
     this.selectedShapeId = null;
     this.selectedKind = null;
 
-    const ctx = this.pending.getContext("2d");
-    ctx.clearRect(0, 0, this.pending.width, this.pending.height);
+    this.clearCanvas(this.pending);
   },
 
+  // Always clears pending first, whether or not anything is selected --
+  // makes this safe to call any time pending needs a refresh (see
+  // applyCamera), not just right after a selection changes.
   drawSelectionOutline() {
+    this.clearCanvas(this.pending);
     if (this.selectedKind !== "canvas") return;
     const shape = this.shapes.find((s) => s.shape_id === this.selectedShapeId);
     if (!shape) return;
 
     const box = boundingBox(shape.points);
-    const ctx = this.pending.getContext("2d");
-    ctx.clearRect(0, 0, this.pending.width, this.pending.height);
-    ctx.save();
-    ctx.strokeStyle = "#d89b4a";
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([5, 4]);
-    ctx.strokeRect(box.minX - 6, box.minY - 6, box.maxX - box.minX + 12, box.maxY - box.minY + 12);
-    ctx.restore();
+    this.withCamera(this.pending, (ctx) => {
+      ctx.save();
+      ctx.strokeStyle = "#d89b4a";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.strokeRect(box.minX - 6, box.minY - 6, box.maxX - box.minX + 12, box.maxY - box.minY + 12);
+      ctx.restore();
+    });
   },
 
   updateEmptyState(hasShapes) {
@@ -723,7 +927,7 @@ export const BoardCanvas = {
 
   renderCanvasShape(shape) {
     this.shapes.push(shape);
-    drawShape(this.committed.getContext("2d"), shape);
+    this.drawWithCamera(this.committed, (ctx) => drawShape(ctx, shape));
   },
 
   renderDomShape(shape) {
@@ -826,6 +1030,12 @@ export const BoardCanvas = {
   // instant=true (the late-join snapshot only) places a marker with no
   // ghost left behind -- there's no "previous position" to fade from,
   // this peer simply wasn't visible a moment ago.
+  //
+  // x/y arrive as WORLD coordinates (the server/mesh never sees screen
+  // space) -- converted to screen here at render time, and stored as
+  // world in this.cursors so repositionCursors can re-derive the right
+  // screen position whenever THIS viewer's own camera changes, with no
+  // extra message from the peer needed.
   updateCursor({ peer_id, x, y, color, label }, instant) {
     const existing = this.cursors.get(peer_id);
     if (existing && !instant) this.spawnGhost(existing);
@@ -833,8 +1043,9 @@ export const BoardCanvas = {
     const el = existing ? existing.el : this.createCursorEl();
     if (!this.cursorsLayer.contains(el)) this.cursorsLayer.appendChild(el);
 
-    el.style.setProperty("--cx", x + "px");
-    el.style.setProperty("--cy", y + "px");
+    const screenPt = this.toScreen({ x, y });
+    el.style.setProperty("--cx", screenPt.x + "px");
+    el.style.setProperty("--cy", screenPt.y + "px");
     el.style.setProperty("--peer-color", color);
     el.querySelector(".cursor-label").textContent = label;
 
@@ -866,11 +1077,16 @@ export const BoardCanvas = {
 
   // The old position, left behind to fade -- see .cursor-ghost's own CSS
   // comment for why this reads as motion without a continuous glide.
+  // x/y here are WORLD (see updateCursor's own comment); converted to
+  // screen once, at spawn time -- unlike a live cursor marker, a ghost
+  // is a short-lived (650ms), untracked, fire-and-forget element, so it
+  // does NOT get repositioned if the camera changes while it's fading.
   spawnGhost({ x, y, color, label }) {
     const ghost = this.createCursorEl();
     ghost.classList.add("cursor-ghost");
-    ghost.style.setProperty("--cx", x + "px");
-    ghost.style.setProperty("--cy", y + "px");
+    const screenPt = this.toScreen({ x, y });
+    ghost.style.setProperty("--cx", screenPt.x + "px");
+    ghost.style.setProperty("--cy", screenPt.y + "px");
     ghost.style.setProperty("--peer-color", color);
     ghost.querySelector(".cursor-label").textContent = label;
     this.cursorsLayer.appendChild(ghost);

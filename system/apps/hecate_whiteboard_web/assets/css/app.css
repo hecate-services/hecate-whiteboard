@@ -342,6 +342,29 @@ a.brand:hover {
   transform: translate(var(--cx), var(--cy)) scale(0.5);
 }
 
+/* Deliberately OUTSIDE .shapes-layer/the canvas transform -- this reads
+   the camera, it doesn't live inside it. Click resets pan+zoom to
+   identity (board_canvas_hook.js's resetCamera). */
+.zoom-indicator {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid var(--slate-line);
+  background: var(--slate-deep);
+  color: var(--chalk-dim);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.zoom-indicator:hover {
+  border-color: var(--amber);
+  color: var(--chalk);
+}
+
 .empty-state {
   position: absolute;
   inset: 0;
@@ -494,6 +517,16 @@ a.brand:hover {
 
 .shapes-layer {
   overflow: hidden;
+  /* transform (translate+scale, the camera) is set inline from JS on
+     every pan/zoom -- board_canvas_hook.js's applyCamera. transform-origin
+     MUST be 0 0 (not the CSS default 50% 50%) to match the canvas
+     layers' own ctx.translate/ctx.scale, which is always anchored at
+     the canvas's own (0,0) -- see withCamera's own comment. Every
+     child (.shape-sticky/.shape-text/.shape-ghost) keeps positioning
+     itself via its own --sx/--sy translate in WORLD units, completely
+     unaware of the camera; this one transform on the shared parent is
+     the entire pan/zoom implementation for this layer. */
+  transform-origin: 0 0;
 }
 
 .shape-sticky,

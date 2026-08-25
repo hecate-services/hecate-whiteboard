@@ -160,6 +160,29 @@ Versioning: [SemVer](https://semver.org/).
   discovery, incoming board-lifecycle event) — subscribe to newly-seen
   boards, unsubscribe from ones that drop out (archived).
 
+- Pan, zoom, and scroll on the board canvas. Every stored/transmitted
+  point (strokes, shapes, presence cursors) is now WORLD-space,
+  independent of any one viewer's window size or zoom level, via a
+  purely client-side camera (pan offset + zoom factor, never persisted
+  or transmitted). Old boards need no migration -- before this, a point
+  was literally "pixels from the canvas's top-left at draw time",
+  indistinguishable from world coordinates recorded under an identity
+  camera. Plain scroll pans; ctrl/cmd+scroll zooms toward the cursor
+  (matches every other infinite-canvas tool, and what a trackpad pinch
+  dispatches on macOS even with no physical Ctrl key). A small
+  "100%" indicator (bottom-right) shows current zoom and resets pan+zoom
+  to identity on click. Canvas-drawn content (strokes/shapes/selection
+  outline) gets the camera applied via `ctx.translate`/`ctx.scale`; DOM
+  shapes (stickies/text/ghost preview) get it via a single CSS
+  `transform` on their shared parent layer, needing no changes to any
+  individual element's own positioning code. Presence cursors
+  deliberately do NOT scale with zoom (stay a constant screen size, like
+  a map pin) -- computed screen position on every camera change instead.
+  Hit-test/selection thresholds and the minimum-drag-size gesture
+  threshold are divided by zoom, so they read as a constant SCREEN-pixel
+  tolerance rather than becoming impossibly precise when zoomed out or
+  overly forgiving when zoomed in.
+
 ### Fixed
 
 - Collapsing the toolbox side pane silently broke every subsequent
