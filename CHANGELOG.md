@@ -257,6 +257,28 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- The `/boards` picker's "N here" presence badge undercounted: a viewer
+  who opened a board but hadn't moved their mouse over the canvas yet
+  was invisible to it, since `TrackPresence.Roster` only ever gained a
+  row for a peer once their JS hook's `cursor:settle` event fired (~400ms
+  after a real pointer movement) -- `BoardLive.mount/3` itself never
+  registered presence, only read it. Found live ("the number of
+  participants in /boards is not correct"). Fixed by having
+  `render_board/4` call `Roster.touch/1` immediately on connect, with
+  `x`/`y` left `nil` (no real cursor position exists yet). Two call sites
+  needed a matching nil-x guard so this doesn't flash a phantom cursor
+  marker at a NaN screen position for other viewers: the join-time
+  snapshot pushed to a newly-connecting peer, and the `cursor_settled`
+  broadcast handler that forwards updates to already-connected peers.
+  `Roster.touch/1` itself needed no change -- a join fact with no
+  position is just another fact to write/broadcast, same as a real
+  settle; the real settle event later overwrites the same row with an
+  actual position, no double-count. Verified live: opened a board in one
+  tab without touching its canvas at all, confirmed the picker in
+  another tab showed "1 here" immediately (previously would have shown
+  no badge); moved the cursor and confirmed the count stayed at 1, not
+  2; closed the tab and confirmed the badge disappeared.
+
 - Escape genuinely did nothing for the most common case: a shape
   selected (single click, no drag at all) with nothing actively being
   dragged or drawn. `cancelGesture` only ever checked

@@ -27,6 +27,20 @@ defmodule TrackPresence.RosterTest do
     assert [%{peer_id: "p1", x: 10, y: 20}] = Roster.list_for_board(@board)
   end
 
+  # Regression for a real bug found live: BoardsLive's "N here" picker
+  # badge counts list_for_board/1, but before BoardLive.render_board/4
+  # started calling touch/1 at mount, a row only ever existed once a
+  # peer's JS hook had debounced a real pointer stop -- so a viewer who
+  # opened a board and never moved their mouse was invisible to the
+  # picker the whole time they were actually there. touch/1 itself needs
+  # no change to support this: a join-time fact with x/y left nil is
+  # just another fact to write/broadcast, same as a real settle.
+  test "touch with nil x/y (a join-time registration, no cursor position yet) still counts" do
+    Roster.touch(%{board_id: @board, peer_id: "p1", x: nil, y: nil, color: "c", label: "l"})
+
+    assert [%{peer_id: "p1", x: nil, y: nil}] = Roster.list_for_board(@board)
+  end
+
   test "remove deletes the row and broadcasts only when a row existed" do
     Roster.touch(%{board_id: @board, peer_id: "p1", x: 1, y: 1, color: "c", label: "l"})
 

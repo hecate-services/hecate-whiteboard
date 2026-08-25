@@ -69,18 +69,46 @@ defmodule HecateWhiteboardWeb.BoardLive do
   end
 
   defp render_board(socket, board_id, board, shapes) do
+    peer_id = new_peer_id()
+    peer_color = presence_color(peer_id)
+    label = host_label()
+
+    # Registers presence at CONNECT time, not at first cursor movement --
+    # BoardsLive's "N here" picker badge counts Roster.list_for_board/1,
+    # and until this call existed that table only ever gained a row once
+    # this peer's JS hook had debounced a real pointer stop (see
+    # Roster.touch/1's own doc). A viewer who opens a board and doesn't
+    # move their mouse was invisible to the picker the whole time they
+    # were actually there -- found live ("the number of participants in
+    # /boards is not correct"). x/y are nil here on purpose: no real
+    # cursor position exists yet, and the two call sites below (the
+    # snapshot filter and the cursor_settled handler) both know to treat
+    # a nil-x row as "present, not yet positioned" rather than rendering
+    # a phantom marker at a NaN screen position for other viewers.
+    #
+    # Guarded on connected?(socket) for the same reason terminate/2 is:
+    # the disconnected static-render pass runs this function too, with a
+    # peer_id that gets thrown away and replaced the instant the socket
+    # actually connects -- registering it would leave an ownerless row
+    # terminate/2 can never clean up (it also guards on connected?/1).
     if connected?(socket) do
       Phoenix.PubSub.subscribe(HecateWhiteboardWeb.PubSub, "board:" <> board_id)
-    end
 
-    peer_id = new_peer_id()
-    label = host_label()
+      Roster.touch(%{
+        board_id: board_id,
+        peer_id: peer_id,
+        x: nil,
+        y: nil,
+        color: peer_color,
+        label: label
+      })
+    end
 
     socket =
       socket
       |> assign(board_id: board_id, page_title: "hecate-whiteboard")
       |> assign(host_label: label)
-      |> assign(peer_id: peer_id, peer_color: presence_color(peer_id), peer_label: label)
+      |> assign(peer_id: peer_id, peer_color: peer_color, peer_label: label)
       |> assign(stroke_count: length(shapes))
       |> assign(editing_title?: false)
       |> assign_board_status(board)
@@ -89,13 +117,13 @@ defmodule HecateWhiteboardWeb.BoardLive do
     # Late-join snapshot for presence, same idea as shapes:snapshot above:
     # a joining viewer sees everyone already-settled immediately, rather
     # than waiting for each of their next pointer pause. Excludes this
-    # peer's own (not-yet-registered) row -- nothing to exclude yet, but
-    # future-safe if this LiveView process is ever re-mounted onto the
-    # same peer_id.
+    # peer's own row, and excludes anyone else's nil-x join-only row too
+    # (nothing to draw yet for a peer who hasn't moved their mouse
+    # either) -- same reasoning as the cursor_settled handler below.
     cursors =
       board_id
       |> Roster.list_for_board()
-      |> Enum.reject(&(&1.peer_id == peer_id))
+      |> Enum.reject(&(&1.peer_id == peer_id or is_nil(&1.x)))
 
     push_event(socket, "cursor:snapshot", %{cursors: cursors})
   end
@@ -265,6 +293,13 @@ defmodule HecateWhiteboardWeb.BoardLive do
         %{assigns: %{peer_id: peer_id}} = s
       ),
       do: {:noreply, s}
+
+  # A join-time registration (Roster.touch/1 called from mount, before
+  # any real pointer movement) carries x: nil -- nothing to render for
+  # other viewers until the first real cursor:settle updates it. Without
+  # this clause, every viewer's mount would flash a marker at a NaN
+  # screen position on every other connected peer's canvas.
+  def handle_info({:cursor_settled, _board_id, %{x: nil}}, socket), do: {:noreply, socket}
 
   def handle_info({:cursor_settled, _board_id, cursor}, socket),
     do: {:noreply, push_event(socket, "cursor:update", cursor)}

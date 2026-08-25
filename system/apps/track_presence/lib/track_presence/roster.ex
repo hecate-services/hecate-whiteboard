@@ -8,12 +8,15 @@ defmodule TrackPresence.Roster do
   # here -- this module only owns the roster and the mesh-wide "here's
   # where I am" fact.
   #
-  # touch/1 is for a LOCALLY-originated settle (this node's own LiveView
-  # calling in after its JS hook debounced a pointer stop) -- it writes
-  # the row, broadcasts locally, AND publishes to mesh. absorb_remote/1 is
-  # for a fact arriving FROM the mesh -- writes the row and broadcasts
-  # locally only, never re-publishes. That asymmetry is what keeps this
-  # loop-free, same trick ShapeLifecycleMeshSubscriber uses for shapes.
+  # touch/1 is for a LOCALLY-originated fact -- either a real settle
+  # (this node's own LiveView calling in after its JS hook debounced a
+  # pointer stop) or a join-time registration at mount with x/y left nil
+  # (BoardLive.render_board/4 -- see its own comment for why the picker's
+  # presence count needs this). Either way it writes the row, broadcasts
+  # locally, AND publishes to mesh. absorb_remote/1 is for a fact
+  # arriving FROM the mesh -- writes the row and broadcasts locally only,
+  # never re-publishes. That asymmetry is what keeps this loop-free, same
+  # trick ShapeLifecycleMeshSubscriber uses for shapes.
   use GenServer
 
   require Logger
