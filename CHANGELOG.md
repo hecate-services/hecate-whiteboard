@@ -215,6 +215,18 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- Escape genuinely did nothing for the most common case: a shape
+  selected (single click, no drag at all) with nothing actively being
+  dragged or drawn. `cancelGesture` only ever checked
+  `drawing`/`drawingGeometry`/`moving`/`marquee` -- all four require an
+  in-progress gesture, so a static selection sitting idle made every
+  one a no-op. Caught by a live report ("ESC still doesn't work") after
+  my own earlier verification only ever exercised the mid-drag-cancel
+  path, never plain select-then-Escape; reproduced first with a real
+  click + a real Escape keypress (not synthetic `dispatchEvent`, which
+  is all my earlier testing used) before fixing it. `cancelGesture` now
+  falls back to clearing the selection when nothing else is active.
+
 - **A real data-loss/corruption bug in `join_board`'s mesh snapshot**,
   found live: msi00's view of a board hosted on beam01 was missing a
   rectangle entirely and showed one sticky with its text, kind, and

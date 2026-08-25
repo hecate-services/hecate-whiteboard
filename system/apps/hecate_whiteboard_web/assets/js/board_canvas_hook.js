@@ -716,11 +716,17 @@ export const BoardCanvas = {
     });
   },
 
-  // Aborts whatever's actively being drawn or dragged, WITHOUT
+  // First aborts whatever's actively being drawn or dragged, WITHOUT
   // committing anything to the server -- the canvas/shape(s) end up
   // exactly where they were before the gesture started. The active
   // tool itself is untouched (matches Figma/Excalidraw convention:
-  // Escape cancels the current gesture, not the tool you're in).
+  // Escape cancels the current gesture, not the tool you're in). If
+  // nothing is actively in progress but something IS selected (the
+  // common case: click a shape, then Escape with no drag at all),
+  // clears the selection instead -- the gap a live user report caught:
+  // the four gesture checks below all require this.drawing/
+  // drawingGeometry/moving/marquee to be truthy, so a static selection
+  // sitting idle made every one of them a no-op.
   cancelGesture() {
     if (this.drawing) {
       this.drawing = false;
@@ -742,6 +748,11 @@ export const BoardCanvas = {
 
     if (this.marquee) {
       this.marquee.cancel();
+      return;
+    }
+
+    if (this.selection.size > 0) {
+      this.clearSelection();
     }
   },
 
