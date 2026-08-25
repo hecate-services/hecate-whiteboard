@@ -143,6 +143,15 @@ Versioning: [SemVer](https://semver.org/).
   misleading rather than just imprecise. Each badge carries a `title`
   tooltip spelling out what it actually means.
 
+- Board picker: a prominent "N here" badge (a new moss-green, deliberately
+  distinct from `dot-relay`'s sage — presence and drawability are
+  different questions) shows on any card, local or remote, that
+  currently has at least one peer present. Reuses the existing
+  mesh-wide presence roster (`TrackPresence.Roster` already absorbs
+  every peer's `cursor_settled_v1` fact regardless of which node hosts
+  their board) — no new mesh plumbing, just a 5s poll on the picker
+  page recomputing counts for whatever boards are currently listed.
+
 ### Fixed
 
 - Collapsing the toolbox side pane silently broke every subsequent

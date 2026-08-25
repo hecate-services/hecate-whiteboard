@@ -36,6 +36,13 @@
               >
                 hosted here
               </span>
+              <span
+                :if={Map.get(@presence_counts, board.board_id, 0) > 0}
+                class="board-card-badge board-card-badge-presence"
+                title="Someone has this board open right now."
+              >
+                {presence_label(Map.get(@presence_counts, board.board_id, 0))}
+              </span>
             </span>
           </a>
         </li>
@@ -68,6 +75,13 @@
                   title="Hosted elsewhere. Opens here; drawing relays to the host over the mesh."
                 >
                   relay
+                </span>
+                <span
+                  :if={Map.get(@presence_counts, board.board_id, 0) > 0}
+                  class="board-card-badge board-card-badge-presence"
+                  title="Someone has this board open right now."
+                >
+                  {presence_label(Map.get(@presence_counts, board.board_id, 0))}
                 </span>
               </span>
             </a>

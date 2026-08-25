@@ -13,6 +13,8 @@
   --amber-soft: rgba(216, 155, 74, 0.16);
   --sage: #7fb0a0;
   --sage-soft: rgba(127, 176, 160, 0.16);
+  --moss: #6fb56a;
+  --moss-soft: rgba(111, 181, 106, 0.16);
   --wait: #6b6f6c;
   --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -692,6 +694,17 @@ a.brand:hover {
 .board-card-badge-hosted {
   color: var(--amber);
   border-color: var(--amber-soft);
+}
+
+/* Deliberately a different green from --sage (dot-relay's color): this
+   badge answers "is someone here right now" -- human presence -- not
+   "can I draw here" (relay). Different question, different color, so
+   the two are never mistaken for the same signal at a glance. */
+.board-card-badge-presence {
+  color: var(--moss);
+  border-color: var(--moss);
+  background: var(--moss-soft);
+  font-weight: 600;
 }
 
 .board-card-title {

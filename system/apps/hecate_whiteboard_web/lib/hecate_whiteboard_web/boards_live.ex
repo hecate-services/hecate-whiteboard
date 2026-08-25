@@ -13,6 +13,18 @@ defmodule HecateWhiteboardWeb.BoardsLive do
   alias GuideBoardLifecycle.InitiateBoard.MaybeInitiateBoard
   alias QueryBoards.ListBoardsOverMesh.ListBoardsOverMesh
   alias QueryBoards.ListHostedBoards.ListHostedBoards
+  alias TrackPresence.Roster
+
+  # Presence is mesh-wide already -- every node absorbs every peer's
+  # cursor_settled_v1 fact regardless of which node hosts that peer's
+  # board (see TrackPresence.Roster's own doc), so Roster.list_for_board/1
+  # answers "is anyone here right now" correctly from ANY node, local or
+  # remote board alike, with no new mesh plumbing. Polled rather than
+  # pushed: presence already has its own ~20s staleness window
+  # (Roster.stale_after_ms/0), so sub-second freshness isn't the bar, and
+  # polling avoids subscribing to a per-board_id "board:<id>" topic for
+  # every card in a list that grows and shrinks as boards are discovered.
+  @presence_poll_ms 5_000
 
   @impl true
   def mount(_params, _session, socket) do
@@ -23,13 +35,15 @@ defmodule HecateWhiteboardWeb.BoardsLive do
       |> assign(
         boards: boards,
         remote_board_facts: %{},
-        remote_boards_loading?: connected?(socket)
+        remote_boards_loading?: connected?(socket),
+        presence_counts: %{}
       )
       |> assign(page_title: "hecate-whiteboard — boards")
 
     socket =
       if connected?(socket) do
         Phoenix.PubSub.subscribe(HecateWhiteboardWeb.PubSub, "boards:remote")
+        send(self(), :refresh_presence)
         start_async(socket, :discover_remote_boards, fn -> ListBoardsOverMesh.call() end)
       else
         socket
@@ -102,6 +116,26 @@ defmodule HecateWhiteboardWeb.BoardsLive do
       facts = merge_remote_fact(socket.assigns.remote_board_facts, board_id, event_type, fact)
       {:noreply, assign(socket, remote_board_facts: facts)}
     end
+  end
+
+  # Recomputed from scratch every tick rather than incrementally --
+  # cheap (a handful of board_ids, one ETS match per id) and immune to
+  # drift, unlike trying to track joins/leaves via per-board
+  # subscriptions for a list of boards that itself keeps changing.
+  @impl true
+  def handle_info(:refresh_presence, socket) do
+    Process.send_after(self(), :refresh_presence, @presence_poll_ms)
+
+    board_ids =
+      Enum.map(socket.assigns.boards, & &1.board_id) ++
+        Map.keys(socket.assigns.remote_board_facts)
+
+    counts =
+      board_ids
+      |> Enum.uniq()
+      |> Map.new(fn board_id -> {board_id, length(Roster.list_for_board(board_id))} end)
+
+    {:noreply, assign(socket, presence_counts: counts)}
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
@@ -178,4 +212,7 @@ defmodule HecateWhiteboardWeb.BoardsLive do
   end
 
   def hosted?(status), do: :evoq_bit_flags.has(status, BoardStatus.hosted())
+
+  def presence_label(1), do: "1 here"
+  def presence_label(n), do: "#{n} here"
 end
