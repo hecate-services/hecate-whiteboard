@@ -1,17 +1,17 @@
 # Plan: hecate-whiteboard — Real-Time Multi-User Whiteboard Over Mesh
 
-**Status:** Drawing works. `host_board` + `draw_stroke` desks, `project_boards`
-(PRJ) + `query_boards` (QRY), and a real Phoenix/LiveView canvas
-(`hecate_whiteboard_web`) are built and verified end to end locally,
-including inside the actual compiled container image (draw → reload →
-strokes persist via the snapshot query; multiple colors; the release's
-own Bandit endpoint, not just `mix phx.server`). Committed and pushed, CI green, deployed and verified live on both
-`beam01.lab` (`http://beam01.lab:8493/`) and `beam02.lab`
-(`http://beam02.lab:8493/`) -- watchtower + the pull-based reconciler
-picked up the new image and config automatically, no manual redeploy
-step needed. Visual design: a chalk-on-slate canvas (warm charcoal,
+**Status:** Boards on separate hosts replicate each other's strokes over
+real macula pubsub, live-verified bidirectional on `beam01.lab` and
+`beam02.lab` (`http://beam0N.lab:8493/`) — draw on one, it appears on
+the other within seconds. `host_board` + `draw_stroke` desks,
+`project_boards` (PRJ) + `query_boards` (QRY), a real Phoenix/LiveView
+canvas (`hecate_whiteboard_web`), and basic mesh replication
+(`StrokeDrawnV1ToMesh` + `BoardMeshSubscriber`) are all built, tested,
+and deployed. Visual design: a chalk-on-slate canvas (warm charcoal,
 chalk-white ink, one amber accent), host/peer status made visible
-rather than hidden. See "Suggested build order" for what comes after.
+rather than hidden. See "Basic mesh replication" and "Suggested build
+order" below for what was found getting here and what's next
+(`join_board` proper, presence, dedup).
 
 **Previously (walking skeleton), for reference:** Repo:
 `github.com/hecate-services/hecate-whiteboard` (public). CI green
@@ -395,6 +395,44 @@ end-to-end on the thinnest possible slice before building out the rest.
    a second peer on a different node to see live strokes at all.
 6. `move_shape` / `remove_shape` / `leave_board`, `track_presence`
    (cursors), rest of the desk list.
+
+### Basic mesh replication — DONE 2026-08-25 (a lighter version of step 5)
+
+Not the full `join_board` + snapshot-reconciliation protocol yet -- a
+simpler first cut, since both beam01 and beam02 already independently
+host the SAME fixed default board_id. Each host now republishes every
+LOCALLY-drawn stroke to a fixed mesh pubsub topic
+(`io.macula/whiteboard-commons/whiteboard/stroke_drawn_v1`, board_id in
+the payload not the topic) via `guide_board_lifecycle`'s
+`StrokeDrawnV1ToMesh`, and subscribes to the same topic via
+`project_boards`' `BoardMeshSubscriber`, which writes incoming remote
+strokes straight into the ETS read model (never through the local
+aggregate -- that asymmetry is what keeps it loop-free without an
+origin tag). **Verified live and bidirectional**: a stroke drawn on
+beam01 appears on beam02 within seconds and vice versa, in the correct
+color, over real macula pubsub.
+
+Three real bugs found and fixed getting there, all live-diagnosed on
+the actual fleet (local dev sandbox couldn't reach the mesh at all —
+see the risk-verification note below):
+
+1. **Payload keys arrive as atoms, not `{text, _}`-tagged.** macula
+   10.1.1 does the same "atomize if this VM already knows the atom"
+   decoding for plain pubsub that `reference_macula_rpc_stream_args_atom_keys`
+   only documented for RPC/stream args before this — that memory (and
+   the older `erlang_macula_sdk_payload_keys` it superseded) is updated.
+   Fixed by tolerating both shapes, not picking one.
+2. **Cold-boot race on `HecateWhiteboardWeb.PubSub`.** The umbrella's
+   real boot order (from actual `mix.exs` deps, not `releases()` list
+   order) has `project_boards` always start before
+   `hecate_whiteboard_web` — a mesh event arriving in the gap crashed on
+   "unknown registry". Fixed by moving PubSub ownership to
+   `project_boards` (the writer side), as its own first child.
+3. **evoq's catchup replay re-publishes local history on every
+   restart** — not fixed, documented as a known gap in
+   `StrokeDrawnV1ToMesh`'s own header (same root cause as
+   `BoardMeshSubscriber`'s pre-existing "no dedup" note: a
+   stroke_id-keyed dedup on the receiving side would fix both).
 
 ### Known simplifications carried from the walking-skeleton phase, not yet revisited
 
