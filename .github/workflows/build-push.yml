@@ -1,0 +1,64 @@
+# Build the OCI image for hecate-whiteboard and push to the registry.
+#
+# Pushes BOTH :latest and the semver tag. The deployed compose tracks
+# :latest under watchtower for zero-touch deploys on the beam fleet, and
+# the semver tags stay published so a bad release can be pinned back to a
+# known one. Mirrors hecate-tube's build-push.yml.
+#
+# NOTE ON PUSHING THIS FILE. An HTTPS push that creates or updates
+# anything under .github/workflows/ needs a token carrying the `workflow`
+# scope, and the error names the FILE rather than the missing scope. Use
+# an SSH remote and the problem does not arise.
+
+name: build-and-push
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    # A push touching only docs/plans still rebuilds and re-pushes
+    # :latest with no code change, and watchtower/the reconciler roll
+    # every box watching it a few seconds later for nothing -- excluded
+    # here, not on tag pushes (semver tags are deliberate releases).
+    paths-ignore: ['**.md', 'plans/**']
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to the registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set tag
+        id: tag
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          # mix.exs lives at system/mix.exs, so both the build context and
+          # the Dockerfile live there too -- "Dockerfiles must be created
+          # close to the code" (workspace CLAUDE.md), same convention
+          # macula-realm's own system/Dockerfile already follows.
+          context: system
+          file: system/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/hecate-services/hecate-whiteboard:latest
+            ghcr.io/hecate-services/hecate-whiteboard:${{ steps.tag.outputs.tag }}

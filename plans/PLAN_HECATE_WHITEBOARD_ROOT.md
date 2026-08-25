@@ -1,0 +1,297 @@
+# Plan: hecate-whiteboard — Real-Time Multi-User Whiteboard Over Mesh
+
+**Status:** Design-only. No repo initialized, no code written, nothing
+committed anywhere. This doc captures a full design conversation
+(2026-08-25) and is the starting point for scaffolding — not a handover
+from a prior build.
+**Created:** 2026-08-25
+
+---
+
+## Read this first
+
+- There is no prior build to summarize here — this is the design itself,
+  not a record of one. Read the whole doc before writing code.
+- **The one-line goal:** this exists so a person can host a live shared
+  canvas on their own machine and have others draw on it with them, with
+  no server anyone has to trust or pay for standing between them.
+- This is the **first true peer-to-peer application** on this stack — no
+  managed backend, no relay company, the host's own node *is* the whole
+  service. Treat the decisions below as setting precedent for what
+  "sovereignty" looks like in a shipped product, not as an internal
+  implementation detail. See `user_commons_intent` / the strategic anchor
+  in project memory for why that framing matters to the user.
+
+## What it is
+
+Comparable to Miro: an infinite 2D canvas, multiple people drawing and
+moving shapes on it simultaneously, live cursors, join mid-session.
+Different from Miro in the one way that matters: there is no central
+"whiteboard.com" server. A user hosts a board on their own node (laptop,
+home box, lab machine); collaborators dial into that specific host over
+macula and draw with them in real time. If the host goes offline, the
+board goes with it — that is the deliberate trade for not needing anyone's
+server.
+
+---
+
+## Architecture decisions (locked in this session)
+
+### Single authority per board, not CRDT
+
+The hosting peer's node is the one order-of-truth for its board — an evoq
+aggregate, one writer. This sidesteps needing a full CRDT merge algorithm:
+there is already exactly one sequencer (whoever is hosting), the same
+trick centralized tools like Figma use, just decentralized to whichever
+peer opened the board.
+
+### Presence is not event-sourced
+
+Presence (who's currently connected, live cursors) is ephemeral session
+state, not durable business history, and does not belong in the event
+store. It lives in its own small non-ES component, `track_presence`: a
+per-board ETS roster (`{peer_id, last_heartbeat}`), a periodic sweep that
+ages out silent peers, and presence-changed broadcasts sent as **mesh
+pubsub only** — an integration fact, never written to the event log.
+Graceful exits are the one exception worth an audit trail: an explicit
+`leave_board` command still emits `peer_departed_v1` into the event store,
+because "who was in this session and when" is a real business fact when
+someone chose to leave; a silent timeout is not.
+
+### Late-join snapshot, not full replay
+
+The host is already running the board live, so its current shape state
+already exists as an in-memory read model, updated synchronously before
+each event is broadcast — a join reads that model, it never replays event
+history. The race to guard against: a stroke landing in the gap between
+"snapshot taken" and "subscribed to live updates." Fix: the client
+subscribes to the board's pubsub topic *before* requesting the snapshot,
+buffers whatever arrives during that round trip, and the snapshot response
+carries `as_of_version` (evoq's own aggregate stream version — no separate
+counter needed). On receipt, the client drops any buffered event with
+`version <= as_of_version` and replays the rest in order. Standard
+subscribe-first-then-snapshot pattern.
+
+### Canvas tooling: Konva.js + perfect-freehand, not tldraw/excalidraw
+
+Both tldraw and excalidraw are React apps with their own built-in
+sync/CRDT engine — pulling either in means a second UI framework inside a
+Phoenix app *and* a competing sync layer fighting the version-number
+reconciliation above. Instead: **Konva.js** (vanilla-JS 2D canvas, its own
+shape/layer/pan-zoom model) driven by a Phoenix LiveView JS hook, with
+**perfect-freehand** (small, framework-agnostic, same author as tldraw)
+just for turning raw pointer samples into smooth tapered ink. Three Konva
+layers: confirmed shapes (server-acked), pending shapes (local optimistic,
+not yet acked), and cursors (fed straight from `track_presence`).
+
+### Deployment shape: one Elixir/Phoenix umbrella, symmetric peer
+
+Everyone who wants to host *or* join runs the same app — "join" is the
+local LiveView dialing a remote host over mesh instead of running its own
+`guide_board_lifecycle`. No separate relay/viewer tier for v1 (see
+"Deferred" below). LiveView is why this is Elixir/Phoenix rather than
+hecate-tube's plain-Erlang/cowboy shape — the canvas hook needs it.
+`hecate_om`, `evoq`, and `macula` all come in as ordinary hex deps of the
+domain app, called directly (`:hecate_om.foo()`, `:evoq_router.dispatch/1`,
+`:macula.publish/3`) per the workspace's no-Elixir-wrapper rule —
+"vendoring" just means a `mix.exs` dependency, nothing bespoke.
+
+---
+
+## Precedent — verified, not assumed
+
+Checked directly against the actual repos before writing this plan, not
+recalled from memory:
+
+- **`guide_{subject}_lifecycle` / `project_{subject}` / `query_{subject}`
+  as separate umbrella apps, in Elixir, already exists**:
+  `macula-realm/system/apps/{guide_realm_lifecycle,project_realm,
+  project_realm_identities,query_realm,query_realm_identities,
+  macula_realm,macula_realm_web}` — same naming convention this plan
+  uses, same domain-app/web-app split, already running in production.
+  This is the direct structural precedent, more relevant than
+  `reckon_traders_of_macao`'s `trom`/`trom_web` (which uses the same
+  domain/web umbrella *shape* but not this naming convention).
+- **evoq-from-Elixir is proven**: `macula-realm/system/mix.exs` and
+  several other Elixir umbrellas in this workspace already depend on
+  `evoq` directly. Not a risk.
+- **A hecate-services daemon carrying its own operator-facing UI has
+  precedent**: hecate-tube (Erlang, plain cowboy forms) already does
+  this, despite hecate-om's own README describing Layer 2 services as
+  headless ("Always-on, containerised, system-class workloads") with UI
+  reserved for Layer 3/4 (`hecate-daemon` and its plugins). hecate-tube
+  already bent that line once; hecate-whiteboard bends it further
+  (LiveView instead of plain forms) but isn't structurally new — the
+  precedent is "a service can talk directly to a human," not just
+  headlessly to other services.
+- **`hecate_om` has never been consumed from Elixir anywhere in this
+  workspace** — grepped every `mix.exs` in the workspace, zero hits.
+  Every existing hecate-om consumer is a plain Erlang OTP release. This
+  is a genuinely first integration, not a proven path — see "Risks"
+  below. `hecate_om` 0.15.0 is the current version (`hecate-om/src/
+  hecate_om.app.src`); check hex.pm for what's actually published before
+  pinning, per the hecate-tube plan's own hard-won lesson that local
+  `.app.src` version numbers and what's published on hex.pm can diverge.
+
+### Hard-won facts carried over from `hecate-tube/plans/PLAN_HECATE_TUBE_ROOT.md`
+
+Don't re-derive these; they're general evoq/tooling facts, not
+tube-specific:
+
+- **Event shape on the wire**: `evoq_projection:project/4` receives
+  `#{event_type, event_id, stream_id, version, data, tags, timestamp,
+  epoch_us}` — your event's own fields are nested under `data`, not
+  top-level. Every projection here (`stroke_drawn_v1_to_board_shapes` etc.)
+  must unwrap `data` first, and must tolerate both atom and binary map
+  keys surviving the store round trip.
+- **Stream id convention**: `reckon_gater_stream_id:new(Prefix)` mints a
+  fresh id, format `<prefix>-<32 lowercase hex>` — mint it inside the
+  command constructor (`initiate_board_v1:new/1`), don't hand-roll a
+  human-readable id. Prefix here: `board`.
+- **`evoq_dispatcher` does not exist** in the pinned evoq version despite
+  older code in this workspace calling it — use `evoq_router:dispatch/1,2`.
+- Even though the host's own aggregate process holds current board state
+  live in memory, queries still go through a proper PRJ→ETS read model
+  (`project_boards`), never read the aggregate directly — keeps write and
+  read sides decoupled per this workspace's stated CQRS principle, and
+  matches hecate-tube's actual proven shape (`project_tube_store`).
+
+---
+
+## Vertical slices
+
+**Division:** `hecate-whiteboard`
+
+### CMD — `guide_board_lifecycle`
+
+```
+initiate_board/   initiate_board_v1    -> board_initiated_v1   (birth desk: identity only, no mesh presence yet)
+host_board/       host_board_v1        -> board_hosted_v1      (opens the board for live mesh connections)
+draw_stroke/      draw_stroke_v1       -> stroke_drawn_v1
+move_shape/       move_shape_v1        -> shape_moved_v1
+remove_shape/     remove_shape_v1      -> shape_removed_v1
+join_board/       join_board_v1        -> peer_admitted_v1     (also returns the snapshot as the RPC reply)
+leave_board/      leave_board_v1       -> peer_departed_v1
+archive_board/    archive_board_v1     -> board_archived_v1
+```
+
+`join_board`'s handler does double duty: validate admission, emit
+`peer_admitted_v1`, then call into `query_boards` for the current
+projection and return `{peer_admitted_v1, snapshot}` as the RPC reply.
+Synchronous local call, same host — no process manager needed for this
+one, it isn't a cross-division reaction.
+
+### PRJ — `project_boards`
+
+```
+board_initiated_v1_to_boards
+board_hosted_v1_to_boards
+stroke_drawn_v1_to_board_shapes
+shape_moved_v1_to_board_shapes
+shape_removed_v1_to_board_shapes
+board_archived_v1_to_boards
+```
+
+### QRY — `query_boards`
+
+```
+get_board_snapshot_by_id/   -> {shapes, as_of_version}
+list_hosted_boards/         -> boards this node is currently hosting
+```
+
+### Support — `track_presence` (own app, not CMD/PRJ/QRY, no event store)
+
+ETS roster per board, heartbeat sweep, presence-changed pubsub broadcasts.
+Not event-sourced — see "Presence is not event-sourced" above for why.
+
+### Umbrella layout
+
+```
+apps/
+  guide_board_lifecycle/   CMD
+  project_boards/          PRJ
+  query_boards/             QRY
+  track_presence/           support
+  hecate_whiteboard/        domain glue: hecate_om_service impl, mesh boot wiring
+  hecate_whiteboard_web/    Phoenix web app: LiveView + the Konva/perfect-freehand hook
+```
+
+---
+
+## Risks / open verification items
+
+Ranked by how much they could reshape this plan if wrong:
+
+1. **`hecate_om_service` behaviour, implemented from Elixir, has never
+   been done.** Should work mechanically (`@behaviour :hecate_om_service`
+   plus the six callbacks is ordinary Erlang/Elixir interop, no different
+   in kind from calling `:evoq_router` or `:macula` directly), but the
+   boot sequence (`hecate_om_sup` auto-starting before the service's own
+   `start/1`, health endpoint wiring, identity/cert loading) has only
+   ever been exercised inside a `rebar3 new hecate_service`-scaffolded
+   Erlang release. First thing to prove with a walking skeleton, before
+   building anything else on top of it.
+2. **hecate-om's scaffold tooling (`scripts/scaffold-service.sh`) only
+   generates Erlang/rebar3 projects.** The Elixir/Phoenix umbrella here
+   has to be hand-assembled from a plain `mix new --umbrella` plus the
+   `hecate_om_service` wiring done by hand, mirroring what the scaffold
+   would have produced rather than running it. Not a blocker, just means
+   no generator to lean on for the substrate app.
+3. **LiveView socket lifecycle vs. mesh connection lifecycle** — a
+   LiveView process is comparatively short-lived (reconnects on page
+   refresh, network blip); the board's mesh RPC/pubsub subscriptions need
+   to survive that without re-running `join_board` on every reconnect.
+   Needs a clear owning process (a per-board or per-session GenServer
+   outliving the LiveView) — not designed yet, first real technical
+   question for the event-storming pass.
+
+## Deferred, not decided against
+
+- **Zero-install joining** (a public relay Phoenix app bridging
+  browser↔mesh for people without their own node, mirroring the
+  hecate-tube/macula-realm split) — explicitly deferred in favor of the
+  same-app peer model for v1, not ruled out as a later addition.
+- **Shape richness beyond stroke/generic shape** (sticky notes, text,
+  images, groups/frames) — the CMD desk list above is deliberately just
+  enough for a walking skeleton (draw, move, remove); a real event-storm
+  pass will very likely expand `guide_board_lifecycle`'s desks the same
+  way hecate-tube's did once a full spec landed.
+- **Board discovery** (how a collaborator learns a board exists / gets
+  invited) is unaddressed — `join_board` assumes the joining peer already
+  has the host's address and board id somehow. Needs a decision (out-of-band
+  link/QR vs. mesh-level discovery) before "join" is fully usable.
+
+---
+
+## Suggested build order (walking skeleton first, per this workspace's own convention)
+
+Mirroring how hecate-tube's Phase 0 worked: prove the mechanism
+end-to-end on the thinnest possible slice before building out the rest.
+
+1. Scaffold the umbrella by hand (`mix new --umbrella`), stub
+   `hecate_whiteboard`'s `hecate_om_service` callbacks, confirm it boots
+   and joins the mesh, confirm `/health` responds. Resolves risk #1 and
+   #2 above before anything else is built.
+2. `initiate_board` + `archive_board` only — the walking skeleton per
+   this workspace's convention (birth + death, nothing in between yet).
+   Verify via a live boot smoke test (per the hecate-tube plan's reusable
+   recipe), not just eunit/exunit — wiring bugs don't show up in unit
+   tests here, they showed up twice in hecate-tube's own Phase 0.
+3. `host_board` + a bare LiveView page that renders an empty Konva stage.
+   Proves the mesh-boot-to-browser path.
+4. `draw_stroke` end to end: one browser, one stroke, host aggregate,
+   projection, back out to the same browser over the pubsub topic.
+   Proves the full CQRS loop before proving multi-peer.
+5. `join_board` + the snapshot/reconciliation protocol, second browser
+   as a second peer. This is where risk #3 (LiveView-vs-mesh lifecycle)
+   has to get resolved for real.
+6. `move_shape` / `remove_shape` / `leave_board`, `track_presence`
+   (cursors), rest of the desk list.
+
+---
+
+## Nothing is committed anywhere
+
+Not a git repo yet. `git init` is a deliberate next step, not taken as
+part of writing this plan, per this workspace's rule to only take
+git-initializing/committing actions when explicitly asked.

@@ -1,0 +1,55 @@
+# Structural lint and unit tests.
+#
+# MUST MATCH `system/Dockerfile`'s build stage image. Unlike hecate-tube
+# (Erlang, resolves a prebuilt QUIC NIF on glibc), this repo's own `mix
+# compile` was confirmed locally to compile macula's DID/MRI/CBOR NIFs
+# from Rust source unconditionally on this macula version -- no
+# MACULA_FORCE_SOURCE_BUILD needed to trigger it, so this image needs the
+# same Rust toolchain the Dockerfile installs, not a lighter one.
+
+name: lint-and-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    container:
+      # MUST MATCH system/Dockerfile's build stage. See the note there.
+      image: hexpm/elixir:1.18.4-erlang-28.1-debian-trixie-20260610-slim
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: apt-get update && apt-get install -y --no-install-recommends build-essential curl cmake git
+      - run: mix local.hex --force && mix local.rebar --force
+
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Cache deps and _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            system/deps
+            system/_build
+          key: ${{ runner.os }}-mix-${{ hashFiles('system/mix.lock') }}
+
+      - working-directory: system
+        run: mix deps.get
+
+      - working-directory: system
+        run: mix compile --warnings-as-errors
+
+      - working-directory: system
+        run: mix format --check-formatted
+
+      - working-directory: system
+        run: mix test

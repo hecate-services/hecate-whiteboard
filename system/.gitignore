@@ -1,0 +1,26 @@
+# The directory Mix will write compiled artifacts to.
+/_build/
+
+# If you run "mix test --cover", coverage assets end up here.
+/cover/
+
+# The directory Mix downloads your dependencies sources to.
+/deps/
+
+# Where third-party dependencies like ExDoc output generated docs.
+/doc/
+
+# If the VM crashes, it generates a dump, let's ignore it too.
+erl_crash.dump
+
+# Also ignore archive artifacts (built via "mix archive.build").
+*.ez
+
+# Temporary files, for example, from tests.
+/tmp/
+
+# The manifest (mix.exs) is the single source of truth; the lock is a
+# regeneratable cache. Tracking it turns it into a silent version
+# ceiling that `deps.get` never advances past on its own -- see this
+# workspace's no_lockfiles_in_git convention (27 repos fixed 2026-08-20).
+mix.lock
