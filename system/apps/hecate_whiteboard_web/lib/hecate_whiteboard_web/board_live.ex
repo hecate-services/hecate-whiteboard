@@ -1,10 +1,20 @@
 defmodule HecateWhiteboardWeb.BoardLive do
   # All view-state is computed here and handed to the template as plain
-  # assigns (hosted?, archived?, can_draw?, host_label, stroke_count) --
-  # the template and the JS hook only ever render decided state, they
-  # never re-derive it. The JS hook is a dumb renderer: it draws whatever
-  # strokes it's pushed and reports finished strokes back up; it holds no
-  # business logic of its own.
+  # assigns (hosted?, archived?, can_draw?, can_rename?, status_dot,
+  # status_hint, host_label, stroke_count) -- the template and the JS
+  # hook only ever render decided state, they never re-derive it. The JS
+  # hook is a dumb renderer: it draws whatever strokes it's pushed and
+  # reports finished strokes back up; it holds no business logic of its
+  # own.
+  #
+  # can_draw? and can_rename? deliberately diverge: renaming stays
+  # authority-only (can_rename? = hosted? and not archived?, unchanged
+  # from this file's original single can_draw? flag), but drawing is now
+  # possible on a board this node doesn't host too -- see
+  # GuideBoardLifecycle.DrawStroke.MaybeDrawStroke.relay/1 and
+  # AnswerDrawStrokeRequests for the write-relay this enables. Renaming
+  # a remote board isn't built; broadening can_draw? without a matching
+  # can_rename? would have silently done that by accident.
   use Phoenix.LiveView
 
   alias GuideBoardLifecycle.BoardStatus
@@ -67,20 +77,30 @@ defmodule HecateWhiteboardWeb.BoardLive do
 
   @impl true
   def handle_event("stroke", %{"points" => points, "color" => color, "width" => width}, socket) do
-    MaybeDrawStroke.dispatch(%{
+    params = %{
       board_id: socket.assigns.board_id,
       points: points,
       color: color,
       width: width
-    })
+    }
+
+    # Hosted here: dispatch locally, same as always. Not hosted here (a
+    # joined board): relay to whoever actually hosts it instead -- see
+    # MaybeDrawStroke.relay/1's own doc for why this needs no reply, the
+    # normal replication path brings the confirmed stroke back to us.
+    if socket.assigns.hosted? do
+      MaybeDrawStroke.dispatch(params)
+    else
+      MaybeDrawStroke.relay(params)
+    end
 
     {:noreply, socket}
   end
 
-  # Title is only editable by the authority for this board -- same gate as
-  # drawing (can_draw?), not a separate rule. A joined/view-only board's
-  # title stays plain text, no click affordance at all.
-  def handle_event("edit_title", _params, %{assigns: %{can_draw?: true}} = socket),
+  # Title is only editable by the authority for this board (can_rename?,
+  # NOT the broader can_draw? -- see this module's own header). A
+  # joined board's title stays plain text, no click affordance at all.
+  def handle_event("edit_title", _params, %{assigns: %{can_rename?: true}} = socket),
     do: {:noreply, assign(socket, editing_title?: true)}
 
   def handle_event("edit_title", _params, socket), do: {:noreply, socket}
@@ -88,7 +108,7 @@ defmodule HecateWhiteboardWeb.BoardLive do
   def handle_event("cancel_rename", _params, socket),
     do: {:noreply, assign(socket, editing_title?: false)}
 
-  def handle_event("rename", %{"title" => title}, %{assigns: %{can_draw?: true}} = socket) do
+  def handle_event("rename", %{"title" => title}, %{assigns: %{can_rename?: true}} = socket) do
     title = String.trim(title)
 
     socket =
@@ -120,16 +140,33 @@ defmodule HecateWhiteboardWeb.BoardLive do
 
   defp assign_board_status(socket, board) do
     status = board.status
+    hosted? = :evoq_bit_flags.has(status, BoardStatus.hosted())
+    archived? = :evoq_bit_flags.has(status, BoardStatus.archived())
 
     assign(socket,
       board_title: board.title || "Untitled board",
-      hosted?: :evoq_bit_flags.has(status, BoardStatus.hosted()),
-      archived?: :evoq_bit_flags.has(status, BoardStatus.archived())
+      hosted?: hosted?,
+      archived?: archived?,
+      # Drawing works whether or not this node hosts the board (relay
+      # picks up the difference); renaming stays authority-only.
+      can_draw?: not archived?,
+      can_rename?: hosted? and not archived?,
+      status_dot: status_dot(hosted?, archived?),
+      status_hint: status_hint(hosted?, archived?)
     )
-    |> then(fn socket ->
-      assign(socket, can_draw?: socket.assigns.hosted? and not socket.assigns.archived?)
-    end)
   end
+
+  defp status_dot(_hosted?, true), do: "dot-wait"
+  defp status_dot(true, false), do: "dot-live"
+  defp status_dot(false, false), do: "dot-relay"
+
+  defp status_hint(_hosted?, true), do: "This board is archived. Read-only."
+
+  defp status_hint(true, false),
+    do: "This board is hosted on this node. There is no other server."
+
+  defp status_hint(false, false),
+    do: "This board is hosted elsewhere. Draws relay to the host over the mesh."
 
   # Dispatch results aren't re-read from the projection immediately after
   # writing -- evoq_event_handler processes the projection asynchronously,

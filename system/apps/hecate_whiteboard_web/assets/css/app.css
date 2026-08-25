@@ -11,6 +11,8 @@
   --chalk-dim: rgba(242, 239, 230, 0.5);
   --amber: #d89b4a;
   --amber-soft: rgba(216, 155, 74, 0.16);
+  --sage: #7fb0a0;
+  --sage-soft: rgba(127, 176, 160, 0.16);
   --wait: #6b6f6c;
   --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -152,14 +154,24 @@ a.brand:hover {
 
 .dot-live {
   background: var(--amber);
-  box-shadow: 0 0 0 3px var(--amber-soft);
+  --pulse-color: var(--amber-soft);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+
+/* Hosted elsewhere but drawable -- a stroke here relays to the real
+   host instead of dispatching locally. Deliberately a different color
+   from dot-live (amber = "this is the one true server"), not just a
+   dimmer version of it -- the distinction is real, not decorative. */
+.dot-relay {
+  background: var(--sage);
+  --pulse-color: var(--sage-soft);
   animation: pulse 2.4s ease-in-out infinite;
 }
 
 @keyframes pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 3px var(--amber-soft);
+    box-shadow: 0 0 0 3px var(--pulse-color);
   }
   50% {
     box-shadow: 0 0 0 6px transparent;
@@ -167,7 +179,8 @@ a.brand:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dot-live {
+  .dot-live,
+  .dot-relay {
     animation: none;
   }
 }

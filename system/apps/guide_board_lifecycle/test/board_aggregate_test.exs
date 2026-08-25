@@ -124,6 +124,79 @@ defmodule GuideBoardLifecycle.BoardAggregateTest do
              })
   end
 
+  # This one is load-bearing for the write-relay (AnswerDrawStrokeRequests):
+  # a relayed stroke is dispatched identically on every node, and it's
+  # exactly this rejection that makes every node except the real host a
+  # safe no-op instead of a split-brain write.
+  test "draw_stroke rejects a board that isn't hosted here" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    assert {:error, :not_hosted} =
+             BoardAggregate.execute(state, %{
+               command_type: :draw_stroke,
+               board_id: "board-test",
+               stroke_id: "s1",
+               points: [%{x: 1, y: 1}],
+               color: "#f2efe6",
+               width: 3
+             })
+  end
+
+  test "draw_stroke rejects a board that was never initiated at all" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    assert {:error, :not_hosted} =
+             BoardAggregate.execute(state, %{
+               command_type: :draw_stroke,
+               board_id: "board-test",
+               stroke_id: "s1",
+               points: [%{x: 1, y: 1}],
+               color: "#f2efe6",
+               width: 3
+             })
+  end
+
+  test "draw_stroke succeeds once a board is hosted" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    {:ok, [hosted]} =
+      BoardAggregate.execute(state, %{command_type: :host_board, board_id: "board-test"})
+
+    state = BoardAggregate.apply(state, hosted)
+
+    assert {:ok, [drawn]} =
+             BoardAggregate.execute(state, %{
+               command_type: :draw_stroke,
+               board_id: "board-test",
+               stroke_id: "s1",
+               points: [%{x: 1, y: 1}],
+               color: "#f2efe6",
+               width: 3
+             })
+
+    assert drawn.event_type == "stroke_drawn_v1"
+  end
+
   test "unknown command is rejected" do
     {:ok, state} = BoardAggregate.init("board-test")
     assert {:error, :unknown_command} = BoardAggregate.execute(state, %{command_type: :nonsense})

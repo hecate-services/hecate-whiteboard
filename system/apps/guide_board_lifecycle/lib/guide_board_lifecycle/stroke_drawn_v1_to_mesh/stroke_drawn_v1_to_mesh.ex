@@ -13,20 +13,16 @@ defmodule GuideBoardLifecycle.StrokeDrawnV1ToMesh.StrokeDrawnV1ToMesh do
   # Design" -- board_id lives in the payload, not baked into the topic
   # string), mirroring hecate-tube's channel_announcement.erl shape.
   #
-  # KNOWN GAP, confirmed live 2026-08-25, not fixed here: evoq's own
-  # catchup replay re-delivers a host's FULL local history to every
-  # registered handler on every boot (confirmed: "[evoq] Catch-up
-  # board_store: routed N events" in the logs) -- this handler has no way
-  # to tell "genuinely new" from "replayed on restart", so it
-  # re-publishes every historical stroke to mesh on every restart. A
-  # peer that already has those strokes (from before, or from its OWN
-  # catchup) ends up with duplicate ETS bag entries and an inflated
-  # stroke count until its own restart cleans it up. Same root cause as
-  # the "no dedup on stroke_id" simplification already noted in
-  # ProjectBoards.BoardMeshSubscriber -- a stroke_id-keyed dedup on the
-  # receiving side (ETS :set instead of :bag, or an explicit seen-set)
-  # would fix both at once. Not done here: basic replication was the
-  # goal, not exactly-once delivery.
+  # evoq's own catchup replay re-delivers a host's FULL local history to
+  # every registered handler on every boot, so this handler DOES
+  # re-publish every historical stroke to mesh on every restart -- that
+  # part is unavoidable and expected. What USED to be a real gap (a peer
+  # receiving those redundant publishes had no way to tell "genuinely
+  # new" from "already seen", so it accumulated duplicates and an
+  # inflated stroke count) is fixed as of 2026-08-25:
+  # ProjectBoards.Store.new_stroke?/1 gives the receiving side
+  # (BoardMeshSubscriber) an atomic stroke_id-keyed dedup gate, so a
+  # redundant publish from here is now a harmless no-op on arrival.
   @behaviour :evoq_event_handler
 
   @topic "io.macula/whiteboard-commons/whiteboard/stroke_drawn_v1"

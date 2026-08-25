@@ -1,8 +1,11 @@
 defmodule GuideBoardLifecycle.DrawStroke.MaybeDrawStroke do
   # Handler for draw_stroke_v1 -- mirrors MaybeInitiateBoard's shape.
   alias GuideBoardLifecycle.BoardAggregate
+  alias GuideBoardLifecycle.DrawStroke.AnswerDrawStrokeRequests
   alias GuideBoardLifecycle.DrawStroke.DrawStrokeV1
   alias GuideBoardLifecycle.DrawStroke.StrokeDrawnV1
+
+  require Logger
 
   def handle_from_map(payload) do
     case DrawStrokeV1.from_map(payload) do
@@ -31,6 +34,33 @@ defmodule GuideBoardLifecycle.DrawStroke.MaybeDrawStroke do
 
       {:error, _} = error ->
         error
+    end
+  end
+
+  # For a joining (non-hosting) peer: publish the raw draw params instead
+  # of dispatching locally -- see AnswerDrawStrokeRequests for the other
+  # half. stroke_id is deliberately NOT minted here; whichever node is
+  # actually hosting mints it the normal way inside its own dispatch/1
+  # call, exactly as if that host's own user had drawn the stroke.
+  def relay(%{board_id: board_id} = params) do
+    case :hecate_om.mesh_handles() do
+      {:ok, pool, realm} ->
+        result =
+          :macula_publisher.start_link(
+            GuideBoardLifecycle.MeshPublisher,
+            pool,
+            realm,
+            AnswerDrawStrokeRequests.topic(),
+            params,
+            []
+          )
+
+        Logger.info("[MaybeDrawStroke] relay #{board_id}: #{inspect(result)}")
+        :ok
+
+      other ->
+        Logger.warning("[MaybeDrawStroke] mesh_handles: #{inspect(other)}, dropping relay")
+        {:error, :mesh_unavailable}
     end
   end
 end

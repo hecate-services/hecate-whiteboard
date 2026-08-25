@@ -18,16 +18,16 @@
         </form>
       <% else %>
         <span
-          class={if @can_draw?, do: "board-title-text board-title-editable", else: "board-title-text"}
-          phx-click={if @can_draw?, do: "edit_title"}
-          title={if @can_draw?, do: "Click to rename"}
+          class={if @can_rename?, do: "board-title-text board-title-editable", else: "board-title-text"}
+          phx-click={if @can_rename?, do: "edit_title"}
+          title={if @can_rename?, do: "Click to rename"}
         >
           {@board_title}
         </span>
       <% end %>
     </div>
-    <div class="status" title="This board is hosted on this node. There is no other server.">
-      <span class={"dot #{if @can_draw?, do: "dot-live", else: "dot-wait"}"}></span>
+    <div class="status" title={@status_hint}>
+      <span class={"dot #{@status_dot}"}></span>
       <span class="status-text">
         <span class="mono">{@host_label}</span>
         <span class="status-sep">·</span>
