@@ -1,7 +1,7 @@
 defmodule GuideBoardLifecycle.ShapeMutation.ShapeMutatedV1ToMesh do
   # Republishes every LOCALLY-originated sticky_placed_v1/text_placed_v1/
-  # shape_moved_v1/shape_removed_v1 as a mesh fact, so a peer hosting (or
-  # watching) the same board_id can replicate it. Mirrors
+  # shape_moved_v1/shape_removed_v1/geometry_drawn_v1 as a mesh fact, so
+  # a peer hosting (or watching) the same board_id can replicate it. Mirrors
   # StrokeDrawnV1ToMesh's shape and its own loop-free reasoning: a mutation
   # arriving over mesh is written straight into the read model (see
   # ProjectBoards.ShapeMeshSubscriber), bypassing the aggregate entirely,
@@ -17,7 +17,13 @@ defmodule GuideBoardLifecycle.ShapeMutation.ShapeMutatedV1ToMesh do
 
   @impl true
   def interested_in,
-    do: ["sticky_placed_v1", "text_placed_v1", "shape_moved_v1", "shape_removed_v1"]
+    do: [
+      "sticky_placed_v1",
+      "text_placed_v1",
+      "shape_moved_v1",
+      "shape_removed_v1",
+      "geometry_drawn_v1"
+    ]
 
   @impl true
   def init(_config), do: {:ok, %{}}

@@ -1,7 +1,7 @@
 defmodule ProjectBoards.ShapeMutatedToBoardShapes.ShapeMutatedToBoardShapes do
   # Projects sticky_placed_v1/text_placed_v1/shape_moved_v1/
-  # shape_removed_v1 onto the `board_shapes` ETS bag -- mirrors
-  # BoardLifecycleToBoards' own "several event types, one read model"
+  # shape_removed_v1/geometry_drawn_v1 onto the `board_shapes` ETS bag --
+  # mirrors BoardLifecycleToBoards' own "several event types, one read model"
   # shape (see that module's header for why :evoq_event_handler, not
   # :evoq_projection).
   #
@@ -15,7 +15,13 @@ defmodule ProjectBoards.ShapeMutatedToBoardShapes.ShapeMutatedToBoardShapes do
 
   @impl true
   def interested_in,
-    do: ["sticky_placed_v1", "text_placed_v1", "shape_moved_v1", "shape_removed_v1"]
+    do: [
+      "sticky_placed_v1",
+      "text_placed_v1",
+      "shape_moved_v1",
+      "shape_removed_v1",
+      "geometry_drawn_v1"
+    ]
 
   @impl true
   def init(_config), do: {:ok, %{}}
@@ -72,6 +78,15 @@ defmodule ProjectBoards.ShapeMutatedToBoardShapes.ShapeMutatedToBoardShapes do
       points: [%{x: field(:x, data), y: field(:y, data)}],
       color: field(:color, data),
       text: field(:text, data)
+    }
+  end
+
+  defp to_shape("geometry_drawn_v1", data) do
+    %{
+      kind: field(:kind, data),
+      shape_id: field(:shape_id, data),
+      points: field(:points, data),
+      color: field(:color, data)
     }
   end
 

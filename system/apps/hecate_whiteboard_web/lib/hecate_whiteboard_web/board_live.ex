@@ -18,6 +18,7 @@ defmodule HecateWhiteboardWeb.BoardLive do
   use Phoenix.LiveView
 
   alias GuideBoardLifecycle.BoardStatus
+  alias GuideBoardLifecycle.DrawGeometry.MaybeDrawGeometry
   alias GuideBoardLifecycle.DrawStroke.MaybeDrawStroke
   alias GuideBoardLifecycle.HostBoard.MaybeHostBoard
   alias GuideBoardLifecycle.LeaveBoard.MaybeLeaveBoard
@@ -165,6 +166,20 @@ defmodule HecateWhiteboardWeb.BoardLive do
     if socket.assigns.hosted?,
       do: MaybeRemoveShape.dispatch(params),
       else: MaybeRemoveShape.relay(params)
+
+    {:noreply, socket}
+  end
+
+  def handle_event(
+        "draw_geometry",
+        %{"kind" => kind, "points" => points, "color" => color},
+        socket
+      ) do
+    params = %{board_id: socket.assigns.board_id, kind: kind, points: points, color: color}
+
+    if socket.assigns.hosted?,
+      do: MaybeDrawGeometry.dispatch(params),
+      else: MaybeDrawGeometry.relay(params)
 
     {:noreply, socket}
   end

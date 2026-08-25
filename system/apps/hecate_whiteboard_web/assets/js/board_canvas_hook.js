@@ -3,15 +3,16 @@
 // currently allowed is decided server-side and read once from
 // data-can-draw -- see BoardLive's own comment on this).
 //
-// Two rendering substrates, chosen per shape kind: strokes stay on
-// <canvas> (cheap for freehand ink, already proven), stickies and text
-// labels are plain DOM elements in the "shapes" layer (cheap for
-// selection/drag/editing, which canvas hit-testing would make much
-// harder for no benefit -- a sticky/text label has exactly one anchor
-// point, a native DOM element already gives free click targets and
+// Two rendering substrates, chosen per shape kind: strokes and basic
+// shapes (rectangle/ellipse/triangle) stay on <canvas> (cheap, and
+// selection there is a plain bounding-box/segment-distance hit test),
+// stickies and text labels are plain DOM elements in the "shapes" layer
+// (cheap for selection/drag/editing -- a sticky/text label has exactly
+// one anchor point, a native DOM element gives free click targets and
 // text layout). "pending" is a pure local scratchpad for whatever's
-// currently under the pointer (an in-progress stroke, a selection
-// outline), cleared the moment the server confirms or the gesture ends.
+// currently under the pointer (an in-progress stroke or shape drag, a
+// selection outline), cleared the moment the server confirms or the
+// gesture ends.
 function smoothPath(ctx, points) {
   if (points.length < 2) return;
   ctx.beginPath();
@@ -47,15 +48,91 @@ function drawStroke(ctx, stroke) {
   ctx.restore();
 }
 
+// Basic shapes are always outlined (not filled) in the caller's ink
+// color, and always defined by the two opposite corners of a bounding
+// box -- the same click-drag convention every other drawing tool uses
+// for these three, and the shape a rename `shape.kind` uses to derive
+// each corner-based reconstruction (see GEOMETRY_KINDS below).
+function geometryBox(points) {
+  const [a, b] = points;
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    w: Math.abs(b.x - a.x),
+    h: Math.abs(b.y - a.y),
+  };
+}
+
+function drawRectangle(ctx, shape) {
+  const { x, y, w, h } = geometryBox(shape.points);
+  ctx.save();
+  ctx.strokeStyle = shape.color;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x, y, w, h);
+  ctx.restore();
+}
+
+function drawEllipse(ctx, shape) {
+  const { x, y, w, h } = geometryBox(shape.points);
+  ctx.save();
+  ctx.strokeStyle = shape.color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawTriangle(ctx, shape) {
+  const { x, y, w, h } = geometryBox(shape.points);
+  ctx.save();
+  ctx.strokeStyle = shape.color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x + w / 2, y);
+  ctx.lineTo(x + w, y + h);
+  ctx.lineTo(x, y + h);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Single dispatch point for every canvas-rendered shape kind -- used by
+// the confirmed-shape layer, the live drag-to-size preview, and the
+// live selected-shape-move preview, so all three always agree on what
+// each kind looks like.
+function drawShape(ctx, shape) {
+  switch (shape.kind) {
+    case "rectangle":
+      return drawRectangle(ctx, shape);
+    case "ellipse":
+      return drawEllipse(ctx, shape);
+    case "triangle":
+      return drawTriangle(ctx, shape);
+    default:
+      return drawStroke(ctx, shape);
+  }
+}
+
 function boundingBox(points) {
   const xs = points.map((p) => p.x);
   const ys = points.map((p) => p.y);
   return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
 }
 
+function pointInBoundingBox(point, points, padding) {
+  const box = boundingBox(points);
+  return (
+    point.x >= box.minX - padding &&
+    point.x <= box.maxX + padding &&
+    point.y >= box.minY - padding &&
+    point.y <= box.maxY + padding
+  );
+}
+
 // Shortest distance from point p to the segment a-b -- used to hit-test
 // a click against a freehand stroke's individual line segments, since a
-// stroke has no single rectangle the way a sticky/text label does.
+// stroke has no single rectangle the way a basic shape does.
 function distanceToSegment(p, a, b) {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
@@ -67,6 +144,15 @@ function distanceToSegment(p, a, b) {
 }
 
 const HIT_THRESHOLD_PX = 10;
+const GEOMETRY_KINDS = ["rectangle", "ellipse", "triangle"];
+// Below this, a click-drag reads as an accidental click, not real intent
+// to draw a zero-size shape -- mirrors how draw_stroke's own single-point
+// "dot" case is the one deliberate exception, not the default.
+const MIN_GEOMETRY_SIZE_PX = 4;
+// How far a pasted shape is offset from what was copied, so paste never
+// lands exactly on top of the original with no visible sign anything
+// happened.
+const PASTE_OFFSET_PX = 24;
 
 // Distinct per-tool cursors -- a user reported switching tools gave no
 // visible feedback at all, and they were right: every non-select tool
@@ -77,6 +163,9 @@ const CURSOR_BY_TOOL = {
   text: "text",
   sticky: "text",
   select: "default",
+  rectangle: "crosshair",
+  ellipse: "crosshair",
+  triangle: "crosshair",
 };
 
 // How long a peer's pointer must sit still before this browser tells the
@@ -94,18 +183,21 @@ export const BoardCanvas = {
     this.emptyState = document.getElementById("board-empty-state");
     this.canDraw = this.el.dataset.canDraw === "true";
 
-    this.activeTool = "pen"; // "pen" | "text" | "select" | "sticky"
+    this.activeTool = "pen"; // "pen" | "text" | "select" | "sticky" | "rectangle" | "ellipse" | "triangle"
     this.color = "#f2efe6";
     this.stickyColor = "#f2994a";
     this.width = 3;
     this.points = [];
     this.drawing = false;
+    this.drawingGeometry = null; // {kind, start} while a shape tool's drag is in progress
+    this.ghostEl = null; // live placement preview while the sticky tool is armed
 
-    this.shapes = []; // every confirmed STROKE, kept so a resize can redraw the canvas layer
+    this.shapes = []; // every confirmed canvas shape (stroke/rectangle/ellipse/triangle)
     this.domShapes = new Map(); // shape_id -> {el, kind, points, color, text} for stickies/text
     this.selectedShapeId = null;
-    this.selectedKind = null; // "stroke" | "dom"
-    this.moving = null; // {shapeId, kind, startPoint, originalPoints, el?}
+    this.selectedKind = null; // "canvas" | "dom"
+    this.moving = null; // {shapeId, kind, startPoint, originalPoints}
+    this.clipboard = null; // {kind, points, color, width?, text?} -- copy/cut/paste
 
     this.cursors = new Map(); // peer_id -> {el, x, y}
     this.settleTimer = null;
@@ -116,9 +208,10 @@ export const BoardCanvas = {
     this.wireInkSwatches();
     this.wireToolButtons();
     this.wireStickySwatches();
+    this.wireCollapseToggle();
     this.wireCanvasInteraction();
     this.wireCursorTracking();
-    this.wireDeleteKey();
+    this.wireKeyboardShortcuts();
 
     this.handleEvent("shapes:snapshot", ({ shapes }) => {
       shapes.forEach((s) => this.renderShape(s));
@@ -159,9 +252,13 @@ export const BoardCanvas = {
       canvas.getContext("2d").setTransform(ratio, 0, 0, ratio, 0, 0);
     });
 
+    this.redrawCommitted();
+  },
+
+  redrawCommitted() {
     const ctx = this.committed.getContext("2d");
     ctx.clearRect(0, 0, this.committed.width, this.committed.height);
-    this.shapes.forEach((s) => drawStroke(ctx, s));
+    this.shapes.forEach((s) => drawShape(ctx, s));
   },
 
   wireInkSwatches() {
@@ -176,12 +273,10 @@ export const BoardCanvas = {
   },
 
   wireStickySwatches() {
-    document.querySelectorAll(".sticky-swatch").forEach((btn) => {
+    document.querySelectorAll(".sticky-row").forEach((btn) => {
       btn.addEventListener("click", () => {
-        document
-          .querySelectorAll(".sticky-swatch")
-          .forEach((b) => b.classList.remove("sticky-swatch-active"));
-        btn.classList.add("sticky-swatch-active");
+        document.querySelectorAll(".sticky-row").forEach((b) => b.classList.remove("sticky-row-active"));
+        btn.classList.add("sticky-row-active");
         this.stickyColor = btn.dataset.stickyColor;
         this.setTool("sticky");
       });
@@ -194,17 +289,35 @@ export const BoardCanvas = {
     });
   },
 
+  wireCollapseToggle() {
+    const pane = document.getElementById("side-pane");
+    const btn = document.getElementById("side-pane-collapse");
+    if (!pane || !btn) return;
+
+    btn.addEventListener("click", () => {
+      const collapsed = pane.classList.toggle("collapsed");
+      btn.title = collapsed ? "Expand toolbox" : "Collapse toolbox";
+      // .side-pane's width is CSS-transitioned (150ms) -- only a window
+      // resize event normally triggers this.resize(), so without this
+      // the canvas's pixel buffer and inline CSS size stay pinned to
+      // whatever they were before the toggle while the pane's own box
+      // moves, and every click coordinate silently misaligns from what's
+      // actually drawn. Waits out the transition rather than resizing
+      // mid-animation into a half-collapsed width.
+      setTimeout(() => this.resize(), 180);
+    });
+  },
+
   setTool(tool) {
     this.activeTool = tool;
     this.deselectShape();
+    if (tool !== "sticky") this.hideGhost();
 
     document.querySelectorAll("[data-tool]").forEach((b) => {
-      b.classList.toggle("tool-active", b.dataset.tool === tool);
+      b.classList.toggle("tool-row-active", b.dataset.tool === tool);
     });
     if (tool !== "sticky") {
-      document
-        .querySelectorAll(".sticky-swatch")
-        .forEach((b) => b.classList.remove("sticky-swatch-active"));
+      document.querySelectorAll(".sticky-row").forEach((b) => b.classList.remove("sticky-row-active"));
     }
 
     // Sticky/text DOM elements only intercept clicks in select mode --
@@ -242,15 +355,21 @@ export const BoardCanvas = {
       // textarea was being created and removed within the same event
       // dispatch, every time, with no visible trace.
       e.preventDefault();
+      this.hideGhost();
       this.placeShapeInline(this.activeTool, p);
       return;
     }
 
+    if (GEOMETRY_KINDS.includes(this.activeTool)) {
+      this.drawingGeometry = { kind: this.activeTool, start: p };
+      return;
+    }
+
     if (this.activeTool === "select") {
-      const hit = this.hitTestStroke(p);
+      const hit = this.hitTestCanvasShape(p);
       if (hit) {
-        this.selectShape(hit.shape_id, "stroke");
-        this.moving = { shapeId: hit.shape_id, kind: "stroke", startPoint: p, originalPoints: hit.points };
+        this.selectShape(hit.shape_id, "canvas");
+        this.moving = { shapeId: hit.shape_id, kind: "canvas", startPoint: p, originalPoints: hit.points };
       } else {
         this.deselectShape();
       }
@@ -266,7 +385,15 @@ export const BoardCanvas = {
       return;
     }
 
-    if (this.moving && this.moving.kind === "stroke") {
+    if (this.drawingGeometry) {
+      const p = this.point(e);
+      const ctx = this.pending.getContext("2d");
+      ctx.clearRect(0, 0, this.pending.width, this.pending.height);
+      drawShape(ctx, { kind: this.drawingGeometry.kind, points: [this.drawingGeometry.start, p], color: this.color });
+      return;
+    }
+
+    if (this.moving && this.moving.kind === "canvas") {
       const p = this.point(e);
       const dx = p.x - this.moving.startPoint.x;
       const dy = p.y - this.moving.startPoint.y;
@@ -276,11 +403,19 @@ export const BoardCanvas = {
       const ctx = this.pending.getContext("2d");
       ctx.clearRect(0, 0, this.pending.width, this.pending.height);
       const shape = this.shapes.find((s) => s.shape_id === this.moving.shapeId);
-      drawStroke(ctx, { points: translated, color: shape.color, width: shape.width });
+      drawShape(ctx, { ...shape, points: translated });
+      return;
+    }
+
+    // Live placement preview -- a ghost of the sticky-to-be, following
+    // the pointer so its size/color is never a surprise. See CSS
+    // .shape-ghost's own comment for why it's purely decorative.
+    if (this.activeTool === "sticky") {
+      this.updateGhost(this.point(e));
     }
   },
 
-  onCanvasUp() {
+  onCanvasUp(e) {
     if (this.drawing) {
       this.drawing = false;
       const ctx = this.pending.getContext("2d");
@@ -293,7 +428,21 @@ export const BoardCanvas = {
       return;
     }
 
-    if (this.moving && this.moving.kind === "stroke") {
+    if (this.drawingGeometry) {
+      const p = this.point(e);
+      const ctx = this.pending.getContext("2d");
+      ctx.clearRect(0, 0, this.pending.width, this.pending.height);
+
+      const { kind, start } = this.drawingGeometry;
+      this.drawingGeometry = null;
+
+      if (Math.abs(p.x - start.x) >= MIN_GEOMETRY_SIZE_PX || Math.abs(p.y - start.y) >= MIN_GEOMETRY_SIZE_PX) {
+        this.pushEvent("draw_geometry", { kind, points: [start, p], color: this.color });
+      }
+      return;
+    }
+
+    if (this.moving && this.moving.kind === "canvas") {
       const ctx = this.pending.getContext("2d");
       ctx.clearRect(0, 0, this.pending.width, this.pending.height);
 
@@ -304,6 +453,24 @@ export const BoardCanvas = {
       this.moving = null;
       this._lastMoveTranslated = null;
       this.drawSelectionOutline();
+    }
+  },
+
+  updateGhost(point) {
+    if (!this.ghostEl) {
+      this.ghostEl = document.createElement("div");
+      this.ghostEl.className = "shape-ghost";
+      this.shapesLayer.appendChild(this.ghostEl);
+    }
+    this.ghostEl.style.setProperty("--sx", point.x + "px");
+    this.ghostEl.style.setProperty("--sy", point.y + "px");
+    this.ghostEl.style.setProperty("--shape-color", this.stickyColor);
+  },
+
+  hideGhost() {
+    if (this.ghostEl) {
+      this.ghostEl.remove();
+      this.ghostEl = null;
     }
   },
 
@@ -323,18 +490,99 @@ export const BoardCanvas = {
       }, CURSOR_SETTLE_MS);
     });
 
-    this.el.addEventListener("pointerleave", () => clearTimeout(this.settleTimer));
+    this.el.addEventListener("pointerleave", () => {
+      clearTimeout(this.settleTimer);
+      this.hideGhost();
+    });
   },
 
-  wireDeleteKey() {
+  wireKeyboardShortcuts() {
     window.addEventListener("keydown", (e) => {
-      if (this.activeTool !== "select" || !this.selectedShapeId) return;
-      if (e.key !== "Backspace" && e.key !== "Delete") return;
-      if (e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return;
+      const inTextInput = e.target.tagName === "TEXTAREA" || e.target.isContentEditable;
 
-      this.pushEvent("remove_shape", { shape_id: this.selectedShapeId });
-      this.deselectShape();
+      if (this.activeTool === "select" && this.selectedShapeId && !inTextInput) {
+        if (e.key === "Backspace" || e.key === "Delete") {
+          this.pushEvent("remove_shape", { shape_id: this.selectedShapeId });
+          this.deselectShape();
+          return;
+        }
+      }
+
+      const meta = e.ctrlKey || e.metaKey;
+      if (!meta || inTextInput) return;
+
+      const key = e.key.toLowerCase();
+      if (key === "c") {
+        this.copySelectedShape();
+      } else if (key === "x") {
+        this.copySelectedShape();
+        if (this.selectedShapeId) {
+          this.pushEvent("remove_shape", { shape_id: this.selectedShapeId });
+          this.deselectShape();
+        }
+      } else if (key === "v") {
+        this.pasteClipboard();
+      }
     });
+  },
+
+  copySelectedShape() {
+    if (!this.selectedShapeId) return;
+
+    if (this.selectedKind === "canvas") {
+      const shape = this.shapes.find((s) => s.shape_id === this.selectedShapeId);
+      if (shape) {
+        this.clipboard = { kind: shape.kind, points: shape.points, color: shape.color, width: shape.width };
+      }
+    } else if (this.selectedKind === "dom") {
+      const entry = this.domShapes.get(this.selectedShapeId);
+      if (entry) {
+        this.clipboard = { kind: entry.kind, points: entry.points, color: entry.color, text: entry.text };
+      }
+    }
+  },
+
+  // No backend command needed for any of copy/cut/paste -- paste just
+  // re-dispatches the same command a fresh placement would use (stroke/
+  // place_sticky/place_text/draw_geometry), each of which already mints
+  // its own shape_id server-side, so a pasted shape is simply a new
+  // shape from the server's point of view.
+  pasteClipboard() {
+    if (!this.clipboard) return;
+
+    const points = this.clipboard.points.map((p) => ({
+      x: p.x + PASTE_OFFSET_PX,
+      y: p.y + PASTE_OFFSET_PX,
+    }));
+
+    switch (this.clipboard.kind) {
+      case "stroke":
+        this.pushEvent("stroke", { points, color: this.clipboard.color, width: this.clipboard.width });
+        break;
+
+      case "sticky":
+        this.pushEvent("place_sticky", {
+          x: points[0].x,
+          y: points[0].y,
+          color: this.clipboard.color,
+          text: this.clipboard.text,
+        });
+        break;
+
+      case "text":
+        this.pushEvent("place_text", {
+          x: points[0].x,
+          y: points[0].y,
+          color: this.clipboard.color,
+          text: this.clipboard.text,
+        });
+        break;
+
+      default:
+        if (GEOMETRY_KINDS.includes(this.clipboard.kind)) {
+          this.pushEvent("draw_geometry", { kind: this.clipboard.kind, points, color: this.clipboard.color });
+        }
+    }
   },
 
   point(e) {
@@ -392,25 +640,30 @@ export const BoardCanvas = {
     });
   },
 
-  hitTestStroke(point) {
-    return this.shapes.find((stroke) => {
-      const box = boundingBox(stroke.points);
-      if (
-        point.x < box.minX - HIT_THRESHOLD_PX ||
-        point.x > box.maxX + HIT_THRESHOLD_PX ||
-        point.y < box.minY - HIT_THRESHOLD_PX ||
-        point.y > box.maxY + HIT_THRESHOLD_PX
-      ) {
-        return false;
-      }
-
-      for (let i = 0; i < stroke.points.length - 1; i++) {
-        if (distanceToSegment(point, stroke.points[i], stroke.points[i + 1]) <= HIT_THRESHOLD_PX) {
-          return true;
-        }
-      }
-      return stroke.points.length === 1 && Math.hypot(point.x - stroke.points[0].x, point.y - stroke.points[0].y) <= HIT_THRESHOLD_PX;
+  hitTestCanvasShape(point) {
+    return this.shapes.find((shape) => {
+      if (shape.kind === "stroke") return this.strokeHit(point, shape);
+      return pointInBoundingBox(point, shape.points, HIT_THRESHOLD_PX);
     });
+  },
+
+  strokeHit(point, stroke) {
+    const box = boundingBox(stroke.points);
+    if (
+      point.x < box.minX - HIT_THRESHOLD_PX ||
+      point.x > box.maxX + HIT_THRESHOLD_PX ||
+      point.y < box.minY - HIT_THRESHOLD_PX ||
+      point.y > box.maxY + HIT_THRESHOLD_PX
+    ) {
+      return false;
+    }
+
+    for (let i = 0; i < stroke.points.length - 1; i++) {
+      if (distanceToSegment(point, stroke.points[i], stroke.points[i + 1]) <= HIT_THRESHOLD_PX) {
+        return true;
+      }
+    }
+    return stroke.points.length === 1 && Math.hypot(point.x - stroke.points[0].x, point.y - stroke.points[0].y) <= HIT_THRESHOLD_PX;
   },
 
   selectShape(shapeId, kind) {
@@ -439,7 +692,7 @@ export const BoardCanvas = {
   },
 
   drawSelectionOutline() {
-    if (this.selectedKind !== "stroke") return;
+    if (this.selectedKind !== "canvas") return;
     const shape = this.shapes.find((s) => s.shape_id === this.selectedShapeId);
     if (!shape) return;
 
@@ -458,19 +711,19 @@ export const BoardCanvas = {
     if (this.emptyState) this.emptyState.style.display = hasShapes ? "none" : "flex";
   },
 
-  // Dispatches by kind: strokes stay on canvas (unchanged path), sticky/
-  // text render as DOM elements -- see this file's own header for why.
+  // Dispatches by kind: strokes/basic shapes stay on canvas, sticky/text
+  // render as DOM elements -- see this file's own header for why.
   renderShape(shape) {
     if (shape.kind === "sticky" || shape.kind === "text") {
       this.renderDomShape(shape);
     } else {
-      this.renderStroke(shape);
+      this.renderCanvasShape(shape);
     }
   },
 
-  renderStroke(stroke) {
-    this.shapes.push(stroke);
-    drawStroke(this.committed.getContext("2d"), stroke);
+  renderCanvasShape(shape) {
+    this.shapes.push(shape);
+    drawShape(this.committed.getContext("2d"), shape);
   },
 
   renderDomShape(shape) {
@@ -537,12 +790,10 @@ export const BoardCanvas = {
   },
 
   applyMove(shapeId, points) {
-    const strokeIdx = this.shapes.findIndex((s) => s.shape_id === shapeId);
-    if (strokeIdx !== -1) {
-      this.shapes[strokeIdx] = { ...this.shapes[strokeIdx], points };
-      const ctx = this.committed.getContext("2d");
-      ctx.clearRect(0, 0, this.committed.width, this.committed.height);
-      this.shapes.forEach((s) => drawStroke(ctx, s));
+    const idx = this.shapes.findIndex((s) => s.shape_id === shapeId);
+    if (idx !== -1) {
+      this.shapes[idx] = { ...this.shapes[idx], points };
+      this.redrawCommitted();
       if (this.selectedShapeId === shapeId) this.drawSelectionOutline();
       return;
     }
@@ -558,12 +809,10 @@ export const BoardCanvas = {
   applyRemove(shapeId) {
     if (this.selectedShapeId === shapeId) this.deselectShape();
 
-    const strokeIdx = this.shapes.findIndex((s) => s.shape_id === shapeId);
-    if (strokeIdx !== -1) {
-      this.shapes.splice(strokeIdx, 1);
-      const ctx = this.committed.getContext("2d");
-      ctx.clearRect(0, 0, this.committed.width, this.committed.height);
-      this.shapes.forEach((s) => drawStroke(ctx, s));
+    const idx = this.shapes.findIndex((s) => s.shape_id === shapeId);
+    if (idx !== -1) {
+      this.shapes.splice(idx, 1);
+      this.redrawCommitted();
       return;
     }
 

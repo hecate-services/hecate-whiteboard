@@ -7,6 +7,7 @@ defmodule GuideBoardLifecycle.BoardAggregate do
   alias GuideBoardLifecycle.ArchiveBoard.MaybeArchiveBoard
   alias GuideBoardLifecycle.BoardState
   alias GuideBoardLifecycle.BoardStatus
+  alias GuideBoardLifecycle.DrawGeometry.MaybeDrawGeometry
   alias GuideBoardLifecycle.DrawStroke.MaybeDrawStroke
   alias GuideBoardLifecycle.HostBoard.MaybeHostBoard
   alias GuideBoardLifecycle.InitiateBoard.MaybeInitiateBoard
@@ -106,6 +107,14 @@ defmodule GuideBoardLifecycle.BoardAggregate do
       :evoq_bit_flags.has_not(status, BoardStatus.hosted()) -> {:error, :not_hosted}
       :evoq_bit_flags.has(status, BoardStatus.archived()) -> {:error, :archived}
       true -> MaybeMoveShape.handle_from_map(payload)
+    end
+  end
+
+  defp do_execute(:draw_geometry, status, payload) do
+    cond do
+      :evoq_bit_flags.has_not(status, BoardStatus.hosted()) -> {:error, :not_hosted}
+      :evoq_bit_flags.has(status, BoardStatus.archived()) -> {:error, :archived}
+      true -> MaybeDrawGeometry.handle_from_map(payload)
     end
   end
 

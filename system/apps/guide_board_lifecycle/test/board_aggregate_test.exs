@@ -541,4 +541,93 @@ defmodule GuideBoardLifecycle.BoardAggregateTest do
                text: "hello"
              })
   end
+
+  test "draw_geometry rejects a board that isn't hosted here" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    assert {:error, :not_hosted} =
+             BoardAggregate.execute(state, %{
+               command_type: :draw_geometry,
+               board_id: "board-test",
+               shape_id: "s1",
+               kind: "rectangle",
+               points: [%{x: 1, y: 1}, %{x: 5, y: 5}],
+               color: "#f2efe6"
+             })
+  end
+
+  test "draw_geometry succeeds once a board is hosted" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    {:ok, [hosted]} =
+      BoardAggregate.execute(state, %{command_type: :host_board, board_id: "board-test"})
+
+    state = BoardAggregate.apply(state, hosted)
+
+    assert {:ok, [drawn]} =
+             BoardAggregate.execute(state, %{
+               command_type: :draw_geometry,
+               board_id: "board-test",
+               shape_id: "s1",
+               kind: "ellipse",
+               points: [%{x: 1, y: 1}, %{x: 5, y: 5}],
+               color: "#f2efe6"
+             })
+
+    assert drawn.event_type == "geometry_drawn_v1"
+  end
+
+  test "draw_geometry rejects an archived board" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    {:ok, [hosted]} =
+      BoardAggregate.execute(state, %{command_type: :host_board, board_id: "board-test"})
+
+    state = BoardAggregate.apply(state, hosted)
+
+    {:ok, [archived]} =
+      BoardAggregate.execute(state, %{command_type: :archive_board, board_id: "board-test"})
+
+    state = BoardAggregate.apply(state, archived)
+
+    assert {:error, :archived} =
+             BoardAggregate.execute(state, %{
+               command_type: :draw_geometry,
+               board_id: "board-test",
+               shape_id: "s1",
+               kind: "triangle",
+               points: [%{x: 1, y: 1}, %{x: 5, y: 5}],
+               color: "#f2efe6"
+             })
+  end
 end

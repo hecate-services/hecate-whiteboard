@@ -1068,6 +1068,86 @@ doc already documented for hecate-whiteboard's own release boot), and
 confirmed via `curl` that the rendered HTML actually carried
 `app.js?v=testsha12345` / `app.css?v=testsha12345` before pushing.
 
+### Toolbox v2: basic shapes, copy/paste, collapse, ghost preview — DONE 2026-08-25
+
+A follow-up request against the shipped toolbox, seven items, "ultrathink"
+against all of them before writing code rather than taking each in
+isolation. Kept `TOOLS` as the section label (the user retracted the
+`DRAW` rename mid-turn -- "hadn't seen it", not a real preference against
+it), renamed `STICKY NOTES` to `EVENT STORMING`.
+
+**Design calls made without asking**, stated up front rather than as
+four separate questions: copy/paste needed zero backend changes (paste
+just re-dispatches the same command a fresh placement would use --
+`draw_stroke`/`place_sticky`/`place_text`/`draw_geometry` -- each of
+which already mints its own `shape_id` server-side, so a paste is
+indistinguishable from a new shape to the server); collapse shrinks to
+an icon-only strip, not fully hidden, so tools stay one click away;
+basic shapes are click-drag-to-size like every other drawing tool,
+outlined (not filled) in the Pen tool's own ink palette rather than a
+third color picker; "show the sticky while dragging" got read as two
+things and both got addressed -- a live cursor-following ghost preview
+before a sticky is placed (there was previously zero feedback until the
+click), and confirming an *already-placed* sticky visibly follows the
+cursor during a select-tool drag (this was already true, just verified).
+
+**Basic shapes** (`draw_geometry` CMD desk, `geometry_drawn_v1`,
+rectangle/ellipse/triangle): shares `guide_board_lifecycle`'s existing
+shape-mutation relay/mesh plumbing (`AnswerShapeMutationRequests`/
+`ShapeMutatedV1ToMesh`) rather than a dedicated pair -- a basic shape is
+a sibling of "place a sticky"/"place a text label", not a separate
+feature. `points` is always the two opposite bounding-box corners; move/
+remove/select all work on it for free through the existing
+kind-agnostic points+shape_id machinery, no new backend needed for
+those three at all.
+
+**Client rendering stays the deliberate hybrid**: strokes and basic
+shapes on `<canvas>` (a generic `drawShape` dispatcher by kind, shared
+by the confirmed layer, the live drag-to-size preview, and the live
+selected-shape-move preview, so all three can never visually disagree),
+sticky/text as DOM elements. Hit-testing for basic shapes is plain
+bounding-box containment (with the same padding threshold strokes use)
+-- deliberately simpler than a stroke's segment-distance test, since a
+rectangle/ellipse/triangle's own outline isn't the useful click target,
+its visual footprint is.
+
+**Sticky notes are now A\*-ratio** (ISO 216, 170x120 against
+sqrt(2)'s 1.414:1 -- close enough nobody will measure it), fixed height
+with `overflow-y: auto` instead of the old `min-height`, so long text
+scrolls inside the note instead of growing it off-ratio.
+
+**A real bug found and fixed live, not assumed away**: collapsing the
+side pane silently broke every click coordinate on the canvas, because
+`resize()` (which syncs the canvas's pixel buffer and inline CSS size
+to its on-screen box) only ever ran on a `window` resize event -- the
+pane's own CSS-transitioned width change never fires one, so the
+canvas kept its pre-collapse size/position while the pane visually
+shrank around it. First noticed as a badly squished rectangle mid-test;
+root-caused by checking `getBoundingClientRect()` against
+`window.innerWidth` rather than assumed. Fixed with a `resize()` call
+timed to land just after the pane's own 150ms CSS transition finishes.
+
+**Verified locally** (`mix phx.server`, this session's now-established
+technique of driving interaction via direct `PointerEvent`/
+`KeyboardEvent` dispatch rather than the browser-automation tool's own
+click simulation, which has been unreliable all session): collapse/
+expand, all three basic shapes drawn and geometrically correct, the
+sticky ghost preview tracking the cursor with the right color and
+ratio, select+drag on a basic shape (not just a sticky, proving the
+canvas hit-test path independently of the DOM path), and copy(Ctrl+C)/
+paste(Ctrl+V) producing a real offset duplicate round-tripped through
+the server. One more real methodology finding along the way: a
+JS-called `.blur()` on a JS-focused `<textarea>` doesn't reliably
+dispatch a real `blur` event in this specific automation environment
+(confirmed by manually dispatching a `FocusEvent("blur")` on the same
+element immediately after, which committed correctly every time) --
+narrowed down to be specific to programmatic focus/blur round-trips
+with no genuine trusted input anywhere in the chain, not something a
+real user's actual click or Enter key press would ever hit, since both
+trigger a real, trusted focus transition that every browser fires
+`blur`/`focus` for natively. Full local `docker build` before pushing,
+same discipline the last two fixes established.
+
 ---
 
 ## Nothing is committed anywhere

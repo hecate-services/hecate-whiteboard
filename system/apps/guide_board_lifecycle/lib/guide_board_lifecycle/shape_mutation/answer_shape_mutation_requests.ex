@@ -1,17 +1,19 @@
 defmodule GuideBoardLifecycle.ShapeMutation.AnswerShapeMutationRequests do
   # Write-relay for a joining (non-hosting) peer's shape mutations --
-  # place_sticky, place_text, move_shape, remove_shape. One shared topic
-  # for all four (mirrors AnswerDrawStrokeRequests' per-topic design, but
-  # consolidated: these four are siblings of one "shape mutation" concern,
-  # not separate features like draw_stroke vs rename_board, so sharing
-  # the relay plumbing avoids four near-identical subscriber/starter
-  # pairs). Every node subscribes; the embedded command_type field picks
-  # which desk's dispatch/1 handles it, and that desk's own BoardAggregate
-  # guard (:not_hosted) makes every node except the real host a safe
-  # no-op -- exactly the authority-check-for-free trick draw_stroke's
-  # write-relay already uses.
+  # place_sticky, place_text, move_shape, remove_shape, draw_geometry.
+  # One shared topic for all five (mirrors AnswerDrawStrokeRequests'
+  # per-topic design, but consolidated: these are siblings of one "shape
+  # mutation" concern, not separate features like draw_stroke vs
+  # rename_board, so sharing the relay plumbing avoids five
+  # near-identical subscriber/starter pairs). Every node subscribes; the
+  # embedded command_type field picks which desk's dispatch/1 handles
+  # it, and that desk's own BoardAggregate guard (:not_hosted) makes
+  # every node except the real host a safe no-op -- exactly the
+  # authority-check-for-free trick draw_stroke's write-relay already
+  # uses.
   @behaviour :macula_subscriber
 
+  alias GuideBoardLifecycle.DrawGeometry.MaybeDrawGeometry
   alias GuideBoardLifecycle.MoveShape.MaybeMoveShape
   alias GuideBoardLifecycle.PlaceSticky.MaybePlaceSticky
   alias GuideBoardLifecycle.PlaceText.MaybePlaceText
@@ -61,6 +63,14 @@ defmodule GuideBoardLifecycle.ShapeMutation.AnswerShapeMutationRequests do
 
         "remove_shape" ->
           MaybeRemoveShape.dispatch(%{board_id: board_id, shape_id: field(:shape_id, fact)})
+
+        "draw_geometry" ->
+          MaybeDrawGeometry.dispatch(%{
+            board_id: board_id,
+            kind: field(:kind, fact),
+            points: field(:points, fact),
+            color: field(:color, fact)
+          })
 
         other ->
           {:error, {:unknown_command_type, other}}

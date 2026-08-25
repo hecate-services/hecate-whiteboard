@@ -1,7 +1,8 @@
 defmodule ProjectBoards.ShapeMeshSubscriber do
   # :macula_subscriber callback for the shared shape_mutated_v1 topic
-  # (sticky_placed_v1/text_placed_v1/shape_moved_v1/shape_removed_v1 --
-  # see GuideBoardLifecycle.ShapeMutation.ShapeMutatedV1ToMesh, the other
+  # (sticky_placed_v1/text_placed_v1/shape_moved_v1/shape_removed_v1/
+  # geometry_drawn_v1 -- see
+  # GuideBoardLifecycle.ShapeMutation.ShapeMutatedV1ToMesh, the other
   # half of this pair, same topic string). Applies straight into the read
   # model, mirrors BoardMeshSubscriber's own loop-free reasoning: never
   # re-enters this host's own aggregate, so it can never trigger the mesh
@@ -39,6 +40,9 @@ defmodule ProjectBoards.ShapeMeshSubscriber do
       "text_placed_v1" ->
         place(board_id, "text", fact)
 
+      "geometry_drawn_v1" ->
+        place_geometry(board_id, fact)
+
       _other ->
         :ok
     end
@@ -55,6 +59,18 @@ defmodule ProjectBoards.ShapeMeshSubscriber do
       points: [%{x: field(:x, fact), y: field(:y, fact)}],
       color: field(:color, fact),
       text: field(:text, fact)
+    }
+
+    :ets.insert(Store.board_shapes_table(), {board_id, shape})
+    broadcast(board_id, {:shape_placed, shape})
+  end
+
+  defp place_geometry(board_id, fact) do
+    shape = %{
+      kind: field(:kind, fact),
+      shape_id: field(:shape_id, fact),
+      points: field(:points, fact),
+      color: field(:color, fact)
     }
 
     :ets.insert(Store.board_shapes_table(), {board_id, shape})

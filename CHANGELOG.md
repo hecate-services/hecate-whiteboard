@@ -17,6 +17,18 @@ Versioning: [SemVer](https://semver.org/).
   render as DOM elements (native click/drag/text layout); strokes stay
   canvas-drawn with a distance-to-segment hit test for selection.
   Archived all accumulated test boards first, per request.
+- Toolbox v2: basic shapes (rectangle/ellipse/triangle, outlined in the
+  Pen tool's own ink palette, click-drag-to-size), a collapsible side
+  pane (icon-only strip, not fully hidden), a live cursor-following
+  ghost preview before a sticky is placed, and Copy/Cut/Paste
+  (Ctrl/Cmd+C/X/V) for any selected shape. Copy/paste needed no backend
+  changes -- paste re-dispatches the same command a fresh placement
+  would use, offset so it never lands on top of the original. Basic
+  shapes reuse the existing shape-mutation relay/mesh plumbing
+  (`draw_geometry` CMD desk, `geometry_drawn_v1`) and get select/move/
+  remove for free through the same kind-agnostic points+shape_id
+  machinery stickies and text already use. Sticky notes are now
+  A*-ratio (170x120, ISO 216).
 
 - Walking skeleton: `hecate_whiteboard` (hecate_om_service, first Elixir
   implementation of that behaviour in this workspace) + `guide_board_lifecycle`
@@ -105,6 +117,12 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- Collapsing the toolbox side pane silently broke every subsequent
+  canvas click coordinate: the canvas's pixel buffer and inline CSS
+  size only ever resynced on a `window` resize event, and the pane's
+  own CSS-transitioned width change never fires one, so the canvas kept
+  its pre-collapse size/position while the pane visually shrank around
+  it. Fixed by resizing right after the pane's 150ms transition settles.
 - Static assets (`/assets/app.js`, `app.css`) had no cache-busting --
   no content-hash filename, no `max-age`/`immutable`/`Last-Modified` --
   so a browser could silently keep serving a stale bundle across a

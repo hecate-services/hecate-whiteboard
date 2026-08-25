@@ -194,7 +194,8 @@ a.brand:hover {
 }
 
 .side-pane {
-  width: 176px;
+  position: relative;
+  width: 184px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -203,6 +204,8 @@ a.brand:hover {
   background: var(--slate-deep);
   border-right: 1px solid var(--slate-line);
   overflow-y: auto;
+  overflow-x: hidden;
+  transition: width 0.15s ease;
 }
 
 .side-section-heading {
@@ -212,6 +215,57 @@ a.brand:hover {
   color: var(--chalk-dim);
   font-weight: 600;
   margin-bottom: 0.6rem;
+  white-space: nowrap;
+}
+
+/* ---- collapse ---- */
+
+.collapse-toggle {
+  position: absolute;
+  top: 0.7rem;
+  right: -13px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--slate-line);
+  background: var(--slate-deep);
+  color: var(--chalk-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 5;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.collapse-toggle:hover {
+  color: var(--chalk);
+  border-color: var(--amber);
+}
+
+.collapse-toggle svg {
+  transition: transform 0.15s ease;
+}
+
+.side-pane.collapsed {
+  width: 52px;
+}
+
+.side-pane.collapsed .collapse-toggle svg {
+  transform: rotate(180deg);
+}
+
+.side-pane.collapsed .side-section-heading,
+.side-pane.collapsed .tool-row-label,
+.side-pane.collapsed .sticky-row-label,
+.side-pane.collapsed .swatches {
+  display: none;
+}
+
+.side-pane.collapsed .tool-row,
+.side-pane.collapsed .sticky-row {
+  justify-content: center;
+  padding: 0.5rem;
 }
 
 /* ---- canvas ---- */
@@ -300,43 +354,57 @@ a.brand:hover {
 
 /* ---- tools (side pane) ---- */
 
-.tool-group {
+.tool-list {
   display: flex;
-  gap: 0.4rem;
-}
-
-.tool-group-vertical {
   flex-direction: column;
+  gap: 0.15rem;
   margin-bottom: 0.9rem;
 }
 
-.tool {
+.tool-row {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  border: 1px solid transparent;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  border: none;
   background: transparent;
   color: var(--chalk-dim);
   cursor: pointer;
+  font-size: 0.8rem;
+  text-align: left;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.tool:hover {
+.tool-row:hover {
   color: var(--chalk);
   background: rgba(242, 239, 230, 0.06);
 }
 
-.tool-active {
+.tool-row-active {
   color: var(--slate-deep);
   background: var(--amber);
 }
 
-.tool-active:hover {
-  background: var(--amber);
+.tool-row-active:hover {
   color: var(--slate-deep);
+  background: var(--amber);
+}
+
+.tool-row-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.tool-row-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .swatches {
@@ -369,30 +437,55 @@ a.brand:hover {
 
 /* ---- sticky notes (side pane) ---- */
 
-.sticky-swatches {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.5rem;
+.sticky-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
 }
 
-.sticky-swatch {
+.sticky-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   width: 100%;
-  aspect-ratio: 1;
-  border-radius: 4px;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
   border: none;
-  padding: 0;
+  background: transparent;
+  color: var(--chalk-dim);
   cursor: pointer;
+  font-size: 0.8rem;
+  text-align: left;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.sticky-row:hover {
+  color: var(--chalk);
+  background: rgba(242, 239, 230, 0.06);
+}
+
+.sticky-row-active {
+  color: var(--chalk);
+  background: rgba(242, 239, 230, 0.1);
+}
+
+.sticky-row-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
   background: var(--sw);
-  box-shadow: 0 0 0 2px var(--slate-deep), 0 0 0 3px transparent;
-  transition: box-shadow 0.15s ease;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
 }
 
-.sticky-swatch:hover {
-  box-shadow: 0 0 0 2px var(--slate-deep), 0 0 0 3px var(--chalk-dim);
+.sticky-row-active .sticky-row-icon {
+  box-shadow: 0 0 0 2px var(--amber);
 }
 
-.sticky-swatch-active {
-  box-shadow: 0 0 0 2px var(--slate-deep), 0 0 0 3px var(--amber);
+.sticky-row-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ---- placed shapes: stickies + text labels (DOM, not canvas) ---- */
@@ -424,9 +517,14 @@ a.brand:hover {
   pointer-events: auto;
 }
 
+/* A*-series ratio (ISO 216, width:height = 1:sqrt(2)), landscape --
+   170x120 is 1.417:1 against sqrt(2)'s 1.414:1, close enough that no
+   one will measure it. Fixed height (not min-height) to actually hold
+   the ratio; text that overflows scrolls within the note instead of
+   growing it taller and drifting off-ratio. */
 .shape-sticky {
-  width: 140px;
-  min-height: 100px;
+  width: 170px;
+  height: 120px;
   padding: 0.6rem 0.65rem;
   border-radius: 3px;
   background: var(--shape-color);
@@ -435,8 +533,29 @@ a.brand:hover {
   line-height: 1.35;
   word-wrap: break-word;
   white-space: pre-wrap;
+  overflow-y: auto;
   box-shadow: 2px 3px 6px rgba(0, 0, 0, 0.35);
   cursor: default;
+}
+
+/* Live preview while the sticky tool is armed but nothing has been
+   clicked yet -- follows the pointer so a placement's size/color is
+   never a surprise. Never intercepts pointer events itself (it would
+   sit on top of everything otherwise) and never participates in
+   selection/hit-testing -- purely decorative, replaced by the real
+   pending textarea on click. */
+.shape-ghost {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(var(--sx), var(--sy));
+  pointer-events: none;
+  opacity: 0.4;
+  width: 170px;
+  height: 120px;
+  border-radius: 3px;
+  background: var(--shape-color);
+  border: 1px dashed rgba(0, 0, 0, 0.35);
 }
 
 .shape-text {
