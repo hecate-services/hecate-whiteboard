@@ -40,9 +40,11 @@ defmodule GuideBoardLifecycle.StrokeDrawnV1ToMesh.StrokeDrawnV1ToMesh do
   end
 
   defp publish(fact) do
+    require Logger
+
     case :hecate_om.mesh_handles() do
       {:ok, pool, realm} ->
-        {:ok, _pid} =
+        result =
           :macula_publisher.start_link(
             GuideBoardLifecycle.MeshPublisher,
             pool,
@@ -52,9 +54,14 @@ defmodule GuideBoardLifecycle.StrokeDrawnV1ToMesh.StrokeDrawnV1ToMesh do
             []
           )
 
+        Logger.info(
+          "[StrokeDrawnV1ToMesh] publish #{inspect(fact[:stroke_id])}: #{inspect(result)}"
+        )
+
         :ok
 
-      {:error, _mesh_unavailable} ->
+      other ->
+        Logger.warning("[StrokeDrawnV1ToMesh] mesh_handles: #{inspect(other)}, dropping publish")
         :ok
     end
   end
