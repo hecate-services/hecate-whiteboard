@@ -255,16 +255,24 @@ defmodule HecateWhiteboardWeb.BoardLive do
   # Never echo a peer's own settled/left cursor back to itself -- this
   # process is both the origin and, via the same board:<id> PubSub topic
   # every viewer subscribes to, a recipient of its own broadcast.
-  def handle_info({:cursor_settled, %{peer_id: peer_id}}, %{assigns: %{peer_id: peer_id}} = s),
-    do: {:noreply, s}
+  #
+  # board_id in the payload (not just the topic) is for BoardsLive's
+  # benefit, which watches many boards' topics from one process and
+  # needs it to disambiguate -- this module only ever subscribes to its
+  # own board_id, so it's always redundant here, hence the `_`.
+  def handle_info(
+        {:cursor_settled, _board_id, %{peer_id: peer_id}},
+        %{assigns: %{peer_id: peer_id}} = s
+      ),
+      do: {:noreply, s}
 
-  def handle_info({:cursor_settled, cursor}, socket),
+  def handle_info({:cursor_settled, _board_id, cursor}, socket),
     do: {:noreply, push_event(socket, "cursor:update", cursor)}
 
-  def handle_info({:cursor_left, peer_id}, %{assigns: %{peer_id: peer_id}} = socket),
+  def handle_info({:cursor_left, _board_id, peer_id}, %{assigns: %{peer_id: peer_id}} = socket),
     do: {:noreply, socket}
 
-  def handle_info({:cursor_left, peer_id}, socket),
+  def handle_info({:cursor_left, _board_id, peer_id}, socket),
     do: {:noreply, push_event(socket, "cursor:remove", %{peer_id: peer_id})}
 
   # Graceful exit only -- guarded on connected?(socket) because terminate/2

@@ -41,20 +41,20 @@ defmodule TrackPresence.Roster do
 
   def touch(%{board_id: board_id} = fact) do
     write(fact)
-    broadcast_locally(board_id, {:cursor_settled, present(fact)})
+    broadcast_locally(board_id, {:cursor_settled, board_id, present(fact)})
     publish_to_mesh(fact)
     :ok
   end
 
   def absorb_remote(%{board_id: board_id} = fact) do
     write(fact)
-    broadcast_locally(board_id, {:cursor_settled, present(fact)})
+    broadcast_locally(board_id, {:cursor_settled, board_id, present(fact)})
     :ok
   end
 
   def remove(board_id, peer_id) do
     case :ets.take(@cursors, {board_id, peer_id}) do
-      [_] -> broadcast_locally(board_id, {:cursor_left, peer_id})
+      [_] -> broadcast_locally(board_id, {:cursor_left, board_id, peer_id})
       [] -> :ok
     end
 

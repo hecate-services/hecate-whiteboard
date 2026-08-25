@@ -17,15 +17,16 @@ defmodule HecateWhiteboardWeb.BoardsLive do
 
   # Presence is mesh-wide already -- every node absorbs every peer's
   # cursor_settled_v1 fact regardless of which node hosts that peer's
-  # board (see TrackPresence.Roster's own doc), so Roster.list_for_board/1
-  # answers "is anyone here right now" correctly from ANY node, local or
-  # remote board alike, with no new mesh plumbing. Polled rather than
-  # pushed: presence already has its own ~20s staleness window
-  # (Roster.stale_after_ms/0), so sub-second freshness isn't the bar, and
-  # polling avoids subscribing to a per-board_id "board:<id>" topic for
-  # every card in a list that grows and shrinks as boards are discovered.
-  @presence_poll_ms 5_000
-
+  # board (see TrackPresence.Roster's own doc), so subscribing to a
+  # board's own "board:<id>" topic answers "is anyone here right now"
+  # correctly from ANY node, local or remote board alike, with no new
+  # mesh plumbing -- just the same topic BoardLive itself already
+  # listens to. Roster now puts board_id IN the broadcast payload
+  # (`{:cursor_settled, board_id, cursor}` / `{:cursor_left, board_id,
+  # peer_id}`), not just the topic, specifically so a multi-board
+  # subscriber like this one can tell which of its N subscriptions a
+  # message came from -- BoardLive's own handlers ignore that field,
+  # since it only ever subscribes to its one board and already knows.
   @impl true
   def mount(_params, _session, socket) do
     boards = ListHostedBoards.call()
@@ -36,15 +37,18 @@ defmodule HecateWhiteboardWeb.BoardsLive do
         boards: boards,
         remote_board_facts: %{},
         remote_boards_loading?: connected?(socket),
-        presence_counts: %{}
+        presence_counts: %{},
+        subscribed_board_ids: MapSet.new()
       )
       |> assign(page_title: "hecate-whiteboard — boards")
 
     socket =
       if connected?(socket) do
         Phoenix.PubSub.subscribe(HecateWhiteboardWeb.PubSub, "boards:remote")
-        send(self(), :refresh_presence)
-        start_async(socket, :discover_remote_boards, fn -> ListBoardsOverMesh.call() end)
+
+        socket
+        |> sync_presence_subscriptions()
+        |> start_async(:discover_remote_boards, fn -> ListBoardsOverMesh.call() end)
       else
         socket
       end
@@ -78,7 +82,12 @@ defmodule HecateWhiteboardWeb.BoardsLive do
          }}
       end)
 
-    {:noreply, assign(socket, remote_board_facts: facts, remote_boards_loading?: false)}
+    socket =
+      socket
+      |> assign(remote_board_facts: facts, remote_boards_loading?: false)
+      |> sync_presence_subscriptions()
+
+    {:noreply, socket}
   end
 
   def handle_async(:discover_remote_boards, {:ok, {:error, _reason}}, socket),
@@ -114,31 +123,64 @@ defmodule HecateWhiteboardWeb.BoardsLive do
       {:noreply, socket}
     else
       facts = merge_remote_fact(socket.assigns.remote_board_facts, board_id, event_type, fact)
-      {:noreply, assign(socket, remote_board_facts: facts)}
+
+      socket =
+        socket
+        |> assign(remote_board_facts: facts)
+        |> sync_presence_subscriptions()
+
+      {:noreply, socket}
     end
   end
 
-  # Recomputed from scratch every tick rather than incrementally --
-  # cheap (a handful of board_ids, one ETS match per id) and immune to
-  # drift, unlike trying to track joins/leaves via per-board
-  # subscriptions for a list of boards that itself keeps changing.
+  # Recomputes only the one board_id the event is actually about --
+  # cheap (a single ETS match) and can't drift, since it's driven by
+  # the exact same touch/remove that updated Roster's own table.
   @impl true
-  def handle_info(:refresh_presence, socket) do
-    Process.send_after(self(), :refresh_presence, @presence_poll_ms)
+  def handle_info({:cursor_settled, board_id, _cursor}, socket),
+    do: {:noreply, refresh_presence_count(socket, board_id)}
 
-    board_ids =
-      Enum.map(socket.assigns.boards, & &1.board_id) ++
-        Map.keys(socket.assigns.remote_board_facts)
-
-    counts =
-      board_ids
-      |> Enum.uniq()
-      |> Map.new(fn board_id -> {board_id, length(Roster.list_for_board(board_id))} end)
-
-    {:noreply, assign(socket, presence_counts: counts)}
-  end
+  def handle_info({:cursor_left, board_id, _peer_id}, socket),
+    do: {:noreply, refresh_presence_count(socket, board_id)}
 
   def handle_info(_msg, socket), do: {:noreply, socket}
+
+  defp refresh_presence_count(socket, board_id) do
+    count = board_id |> Roster.list_for_board() |> length()
+    assign(socket, presence_counts: Map.put(socket.assigns.presence_counts, board_id, count))
+  end
+
+  # Diffs the currently-listed board_ids (local + remote) against what
+  # this process is already subscribed to, subscribing to newly-seen
+  # ones and unsubscribing from ones that dropped out (an archived
+  # remote board, mainly) -- called after every state change that can
+  # grow or shrink that set, instead of fixing the subscription set
+  # once at mount. Also (re)seeds presence_counts for every currently
+  # known board_id, so a board that already had peers on it when
+  # discovered shows the right count immediately, not just after its
+  # next cursor event.
+  defp sync_presence_subscriptions(socket) do
+    current_ids =
+      MapSet.new(
+        Enum.map(socket.assigns.boards, & &1.board_id) ++
+          Map.keys(socket.assigns.remote_board_facts)
+      )
+
+    previous_ids = socket.assigns.subscribed_board_ids
+
+    Enum.each(MapSet.difference(current_ids, previous_ids), fn board_id ->
+      Phoenix.PubSub.subscribe(HecateWhiteboardWeb.PubSub, "board:" <> board_id)
+    end)
+
+    Enum.each(MapSet.difference(previous_ids, current_ids), fn board_id ->
+      Phoenix.PubSub.unsubscribe(HecateWhiteboardWeb.PubSub, "board:" <> board_id)
+    end)
+
+    counts =
+      Map.new(current_ids, fn board_id -> {board_id, length(Roster.list_for_board(board_id))} end)
+
+    assign(socket, subscribed_board_ids: current_ids, presence_counts: counts)
+  end
 
   @impl true
   def handle_event("create", %{"title" => title}, socket) do

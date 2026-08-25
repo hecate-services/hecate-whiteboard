@@ -149,8 +149,16 @@ Versioning: [SemVer](https://semver.org/).
   currently has at least one peer present. Reuses the existing
   mesh-wide presence roster (`TrackPresence.Roster` already absorbs
   every peer's `cursor_settled_v1` fact regardless of which node hosts
-  their board) — no new mesh plumbing, just a 5s poll on the picker
-  page recomputing counts for whatever boards are currently listed.
+  their board) — no new mesh plumbing needed. Originally shipped as a
+  5s poll, then replaced same-day with real push: `Roster` now puts
+  `board_id` in the broadcast payload itself
+  (`{:cursor_settled, board_id, cursor}` / `{:cursor_left, board_id,
+  peer_id}`), not just the PubSub topic, so `BoardsLive` can subscribe
+  to every listed board's own `"board:<id>"` topic from one process and
+  tell them apart. Subscriptions are diffed against the current
+  local+remote board_id set on every state change (mount, remote
+  discovery, incoming board-lifecycle event) — subscribe to newly-seen
+  boards, unsubscribe from ones that drop out (archived).
 
 ### Fixed
 

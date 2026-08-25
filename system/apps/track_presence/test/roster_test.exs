@@ -22,7 +22,7 @@ defmodule TrackPresence.RosterTest do
       label: "beam01 via de-falkenstein"
     })
 
-    assert_receive {:cursor_settled, %{peer_id: "p1", x: 10, y: 20}}
+    assert_receive {:cursor_settled, @board, %{peer_id: "p1", x: 10, y: 20}}
 
     assert [%{peer_id: "p1", x: 10, y: 20}] = Roster.list_for_board(@board)
   end
@@ -33,14 +33,14 @@ defmodule TrackPresence.RosterTest do
     Phoenix.PubSub.subscribe(HecateWhiteboardWeb.PubSub, "board:" <> @board)
 
     Roster.remove(@board, "p1")
-    assert_receive {:cursor_left, "p1"}
+    assert_receive {:cursor_left, @board, "p1"}
     assert Roster.list_for_board(@board) == []
 
     # Removing an already-gone (or never-present) peer is a silent no-op,
     # not a second broadcast -- this is what makes a stray disconnected
     # LiveView's terminate/2 (see BoardLive's own comment) harmless.
     Roster.remove(@board, "p1")
-    refute_receive {:cursor_left, "p1"}
+    refute_receive {:cursor_left, @board, "p1"}
   end
 
   test "sweep ages out only rows older than stale_after_ms" do
