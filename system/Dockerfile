@@ -48,6 +48,14 @@ COPY apps/hecate_whiteboard_web/mix.exs ./apps/hecate_whiteboard_web/
 RUN mix deps.get --only prod
 RUN mix deps.compile
 
+# Cache-busts /assets/app.js and app.css across a redeploy -- see
+# HecateWhiteboardWeb.BuildInfo's own header for why this exists.
+# Declared here, not earlier, so a commit that only touches lib/ (i.e.
+# every commit) doesn't also bust the deps.get/deps.compile layers
+# above, which already only rebuild when mix.exs actually changes.
+ARG GIT_SHA=dev
+ENV GIT_SHA=${GIT_SHA}
+
 COPY config ./config
 COPY apps ./apps
 RUN mix compile

@@ -68,6 +68,17 @@ function distanceToSegment(p, a, b) {
 
 const HIT_THRESHOLD_PX = 10;
 
+// Distinct per-tool cursors -- a user reported switching tools gave no
+// visible feedback at all, and they were right: every non-select tool
+// fell back to the same bare "crosshair". Text/sticky share "text"
+// since both ultimately open a typeable textarea on click.
+const CURSOR_BY_TOOL = {
+  pen: "crosshair",
+  text: "text",
+  sticky: "text",
+  select: "default",
+};
+
 // How long a peer's pointer must sit still before this browser tells the
 // server where it settled -- see TrackPresence.Roster's own header for
 // why this is a debounce-on-stop, not a continuous stream: a fast-moving
@@ -200,7 +211,7 @@ export const BoardCanvas = {
     // every other tool needs clicks to fall through to the canvas below
     // so drawing/placing works even where a shape already sits.
     this.shapesLayer.classList.toggle("interactive", tool === "select");
-    this.pending.style.cursor = tool === "select" ? "default" : "crosshair";
+    this.pending.style.cursor = CURSOR_BY_TOOL[tool] || "crosshair";
   },
 
   wireCanvasInteraction() {

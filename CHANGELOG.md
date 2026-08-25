@@ -105,6 +105,21 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- Static assets (`/assets/app.js`, `app.css`) had no cache-busting --
+  no content-hash filename, no `max-age`/`immutable`/`Last-Modified` --
+  so a browser could silently keep serving a stale bundle across a
+  redeploy indefinitely, with no error and no visible sign anything was
+  wrong. A user report right after the toolbox shipped ("text/sticky
+  tools do nothing") turned out to be exactly this: their browser had
+  already cached the previous bundle. Fixed by baking the git commit
+  into the asset URLs (`app.js?v=<sha>`), computed at compile time via
+  `HecateWhiteboardWeb.BuildInfo` (no cross-stage Dockerfile ENV
+  plumbing needed) and passed in from CI as a Docker build arg.
+- Every non-select tool shared the exact same cursor
+  (`crosshair`), so switching tools gave no visible feedback --
+  confirmed via `getComputedStyle`, part of the same user report above.
+  Text/sticky now show a `text` cursor; pen keeps crosshair; select
+  keeps the default arrow.
 - Placing a sticky note or text label silently did nothing, every
   time, with no visible trace: `textarea.focus()` called synchronously
   inside a `pointerdown` handler didn't stick, because the pointerdown

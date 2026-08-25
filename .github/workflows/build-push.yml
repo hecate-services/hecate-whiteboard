@@ -59,6 +59,8 @@ jobs:
           context: system
           file: system/Dockerfile
           push: true
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           tags: |
             ghcr.io/hecate-services/hecate-whiteboard:latest
             ghcr.io/hecate-services/hecate-whiteboard:${{ steps.tag.outputs.tag }}

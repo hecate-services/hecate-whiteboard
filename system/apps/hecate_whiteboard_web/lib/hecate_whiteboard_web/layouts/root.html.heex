@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={Plug.CSRFProtection.get_csrf_token()} />
     <title>{assigns[:page_title] || "hecate-whiteboard"}</title>
-    <link rel="stylesheet" href="/assets/app.css" />
+    <link rel="stylesheet" href={"/assets/app.css?v=" <> HecateWhiteboardWeb.BuildInfo.asset_version()} />
   </head>
   <body>
     {@inner_content}
-    <script defer src="/assets/app.js">
+    <script defer src={"/assets/app.js?v=" <> HecateWhiteboardWeb.BuildInfo.asset_version()}>
     </script>
   </body>
 </html>

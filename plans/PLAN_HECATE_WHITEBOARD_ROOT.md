@@ -1015,6 +1015,59 @@ count only ever increments (on `stroke_drawn_v1`), never decrements on
 just the displayed count can overstate what is currently on the board
 after a delete.
 
+### Stale-asset cache bug — FOUND AND FIXED 2026-08-25, same day
+
+User report right after the toolbox shipped: "i can't seem to be able
+to type text (no dashed target box, cursor doesnt change)" / "postits
+don't draw ... can i type text in a postit?" This looked at first like
+the toolbox itself was still broken, but a careful re-verification
+(after discovering and working around an unrelated coordinate-scaling
+mismatch in this session's own browser-automation tool -- screenshots
+report 1568px width, the real viewport is 1900px CSS px, and clicking
+at a screenshot-space coordinate without converting it lands somewhere
+else entirely; ref-based element clicking sidesteps this cleanly)
+showed the shipped code working correctly end-to-end: tool switch,
+placement, typing, all fine.
+
+That mismatch pointed at the real cause: `curl -I` on the deployed
+`/assets/app.js` showed `Cache-Control: public` with no `max-age`, no
+`immutable`, no `Last-Modified` -- this repo's plain esbuild output (no
+`mix phx.digest`, no content-hashed filename, per its own Dockerfile
+comment on why not) gives the browser no reliable freshness signal at
+all. A browser's heuristic caching can and does serve a stale bundle
+indefinitely across a redeploy, completely silently -- no error, no
+console warning, the page just keeps running yesterday's JS forever
+under an unchanged URL. The user's report landed right after this
+session announced the toolbox as "live," which fits: their browser had
+almost certainly already fetched `/assets/app.js` once before that
+point and never refetched it.
+
+Fixed by baking the git commit SHA into the asset URLs themselves
+(`/assets/app.js?v=<sha>`), so every deploy is a genuinely new URL and
+a stale cache can never survive one. `HecateWhiteboardWeb.BuildInfo`
+reads `GIT_SHA` via a module attribute (compile-time, not a runtime
+`System.get_env/2` call), so the value survives into the release with
+no cross-stage ENV plumbing between the Dockerfile's build and runtime
+stages -- it's baked into the compiled `.beam` bytecode during the
+build stage, where `ARG GIT_SHA` / `ENV GIT_SHA` are declared right
+before `mix compile`, late enough that it doesn't bust the
+`deps.get`/`deps.compile` cache layers on every commit. CI now passes
+`build-args: GIT_SHA=${{ github.sha }}` to `docker/build-push-action`.
+
+Also fixed the *actually* real (if smaller) usability gap the report
+surfaced: every non-select tool used the exact same `cursor: crosshair`
+value, so switching tools gave no visible feedback at all -- confirmed
+via `getComputedStyle`, not assumed. Text and sticky now show `text`
+(both ultimately open a typeable textarea); pen keeps crosshair; select
+keeps the default arrow.
+
+Verified the whole fix locally first: full `docker build --build-arg
+GIT_SHA=testsha1234567890 --load`, ran the resulting image (hit the
+same `--pids-limit -1 --memory 2g` local-Docker-daemon requirement this
+doc already documented for hecate-whiteboard's own release boot), and
+confirmed via `curl` that the rendered HTML actually carried
+`app.js?v=testsha12345` / `app.css?v=testsha12345` before pushing.
+
 ---
 
 ## Nothing is committed anywhere
