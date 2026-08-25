@@ -94,6 +94,19 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- The presence/cursors push above broke the container build:
+  `Dockerfile`'s staged per-app `COPY apps/<app>/mix.exs` lines were
+  never updated for the new `track_presence` app, so `mix deps.compile`
+  failed inside the image build and CI's build-and-push job failed
+  outright -- ghcr never got a new `:latest`, so beam01/beam02/msi00
+  correctly kept running the previous image rather than picking up
+  anything broken. Caught by the user testing live ("when i draw on the
+  beam01 test board, it doesn't show up on beam02"); the underlying
+  mesh replication was actually fine on the still-running previous
+  image (confirmed with real browser tabs before touching any code).
+  Fixed with one added `COPY` line, verified with a full local `docker
+  build`, then re-verified the user's exact scenario against the
+  now-correctly-deployed image on all three nodes.
 - `HecateWhiteboardWeb.ErrorView` was missing, so Phoenix's own
   naming-convention default for `render_errors` (derived from the
   Endpoint module when unconfigured) pointed at a module that didn't

@@ -875,6 +875,43 @@ respectively), confirming task ordering doesn't have to block on manual
 redeploy checks when watchtower/podman-auto-update are already doing
 their job.
 
+**Then a real deploy bug, caught by the user testing live**: "when i
+draw on the beam01 test board, it doesn't show up on beam02." The
+presence/cursors push had broken the container build --
+`system/Dockerfile`'s staged `COPY apps/<app>/mix.exs` lines (kept
+deliberately separate from `COPY apps` itself, so the dependency-only
+layer survives lib/ changes) were never updated for the new
+`track_presence` app, so `mix deps.compile` failed inside the image
+build with "Cannot compile dependency :track_presence because it isn't
+available" -- CI's build-and-push job failed outright, ghcr never got a
+new `:latest`, and watchtower/podman-auto-update correctly found
+nothing to pull. What the user was actually looking at was the
+STILL-RUNNING previous image (confirmed via `docker inspect`'s image
+digest and `docker logs` showing no recent restart). Live-tested
+drawing on that previous image via real browser tabs on beam01 and
+beam02 and it replicated fine in ~2-3s, which is what pointed at "never
+shipped" rather than "shipped and broken."
+
+Fixed with one added `COPY` line, verified with a full local `docker
+build` before pushing again (this time actually building past the
+point the previous attempt failed). Confirmed the fix landed
+correctly: CI green, all three nodes independently picked up the new
+image within about 90 seconds of the push with no manual trigger
+needed this time, `docker logs`/`podman logs` on each showed both new
+mesh subscribers (`CursorMeshSubscriberStarter`,
+`PeerDepartedMeshSubscriberStarter`) starting cleanly with no errors.
+**Then re-ran the exact scenario the user reported**, live, in real
+browser tabs against the NOW-CORRECT deployed image: drew on beam01,
+watched it appear on beam02 within a few seconds; separately confirmed
+mesh-wide cursor presence the same way (hovered on beam01, watched a
+cursor labeled "beam01 via de-falkenstein" appear and track movement
+on beam02's tab). One early screenshot right after a fresh tab
+navigation looked like a stroke had failed to replicate at all
+(neither side showed it) -- turned out to be a stale first-mount
+snapshot race with the browser automation tool's own screenshot timing,
+not a real gap; redrawing and re-checking a few seconds later showed it
+had landed correctly on both sides all along.
+
 ---
 
 ## Nothing is committed anywhere
