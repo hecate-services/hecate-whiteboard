@@ -72,6 +72,13 @@ Versioning: [SemVer](https://semver.org/).
   `station-it-milan` (beam01/beam02 both use station-de-frankfurt) and
   re-ran everything, so the proof is of a genuine cross-station hop, not
   three peers fanning out from one shared relay.
+- Repointed beam01 (`station-de-falkenstein`) and beam02
+  (`station-fi-helsinki`) so all three peers now sit on three distinct
+  stations, not two-sharing-frankfurt-plus-milan. Re-verified
+  replication and write-relay by stroke_id in both directions with no
+  two peers sharing a relay. The topbar now shows which station each
+  peer is on (`"beam01 via de-falkenstein"`), read live from
+  `MACULA_STATION_SEEDS`.
 
 ### Fixed
 

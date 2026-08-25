@@ -225,9 +225,37 @@ defmodule HecateWhiteboardWeb.BoardLive do
   end
 
   defp host_label do
-    case Node.self() do
-      :nonode@nohost -> "local"
-      node -> node |> Atom.to_string() |> String.split("@") |> List.last()
+    host =
+      case Node.self() do
+        :nonode@nohost -> "local"
+        node -> node |> Atom.to_string() |> String.split("@") |> List.last() |> host_short()
+      end
+
+    case station_label() do
+      nil -> host
+      station -> host <> " via " <> station
+    end
+  end
+
+  # "beam01.lab" -> "beam01" -- the ".lab" suffix is implied by the demo
+  # fleet's own naming, dropping it keeps the topbar from repeating what
+  # "via {station}" already makes clear is a machine, not a domain.
+  defp host_short(host), do: host |> String.split(".") |> List.first()
+
+  # "https://station-de-falkenstein.macula.io:4433" -> "de-falkenstein".
+  # MACULA_STATION_SEEDS is a single URL for this app (no comma-separated
+  # fallback list like hecate-dronex uses), so the first match is the
+  # only one there is.
+  defp station_label do
+    case System.get_env("MACULA_STATION_SEEDS") do
+      nil ->
+        nil
+
+      seeds ->
+        case Regex.run(~r/station-([a-z0-9-]+)\.macula\.io/, seeds) do
+          [_, name] -> name
+          nil -> nil
+        end
     end
   end
 end

@@ -1,11 +1,12 @@
 # Plan: hecate-whiteboard — Real-Time Multi-User Whiteboard Over Mesh
 
-**Status:** Live on THREE nodes across TWO real stations —
-`beam01.lab`/`beam02.lab` (docker+watchtower, station-de-frankfurt) and
-`msi00.lab` (podman Quadlet, station-it-milan). Boards replicate,
-cross-node join and discovery work, and a joining peer can draw
-(write-relay) — all confirmed live across the station boundary, not
-just same-relay fan-out. `host_board` + `draw_stroke` desks,
+**Status:** Live on THREE nodes across THREE real, genuinely distinct
+stations — `beam01.lab` (docker+watchtower, station-de-falkenstein),
+`beam02.lab` (docker+watchtower, station-fi-helsinki), `msi00.lab`
+(podman Quadlet, station-it-milan). Boards replicate, cross-node join
+and discovery work, and a joining peer can draw (write-relay) — all
+confirmed live with no two peers sharing a relay. `host_board` +
+`draw_stroke` desks,
 `project_boards` (PRJ) + `query_boards` (QRY), a real Phoenix/LiveView
 canvas (`hecate_whiteboard_web`), and mesh replication
 (`StrokeDrawnV1ToMesh` + `BoardMeshSubscriber`) are all built, tested,
@@ -767,6 +768,46 @@ by clicking the title, typing, and pressing Enter -- confirmed it
 persisted across a reload AND propagated to beam01's mesh-discovered
 list within the same 1.5s query window, no manual refresh needed
 beyond the normal page load.
+
+### All three peers on distinct stations, header shows which — DONE 2026-08-25
+
+beam01 and beam02 had both stayed on `station-de-frankfurt` since the
+walking-skeleton phase; only msi00 had been deliberately repointed
+(see "Then asked and confirmed a sharper question" above). Repointed
+beam01 to `station-de-falkenstein` and beam02 to `station-fi-helsinki`
+in `macula-io/macula-demo` (`infrastructure/beam0{1,2}.lab/
+hecate-whiteboard-config.env`), after confirming via `dig AAAA` that
+all three candidate stations (falkenstein, helsinki, milan) resolve to
+three distinct IPv6 addresses -- this workspace has a documented
+history of a station hostname silently repointing to a different box,
+so the check was made, not assumed. Pushed, triggered
+`hecate-reconcile.service` on both beam nodes rather than waiting for
+the 2-minute timer, confirmed each container recreated with the new
+`MACULA_STATION_SEEDS` via `printenv` inside the container.
+
+**Live-verified both directions, by stroke_id, across all three now
+genuinely distinct stations:** dispatched a stroke directly on beam01
+(Falkenstein) via RPC, captured the aggregate-assigned stroke_id
+(command-supplied stroke_ids are overridden server-side, learned mid
+this verification), and found that exact id in beam02's (Helsinki)
+and msi00's (Milan) `ProjectBoards.Store` ETS tables within 3s.
+Reversed it: called `MaybeDrawStroke.relay/1` from msi00 against
+beam01's hosted board, then confirmed the resulting stroke_id landed
+on both beam02 and back on msi00 itself. No two peers shared a relay
+for either direction of this test.
+
+The topbar's host label (`{@host_label}`, `board_live.html.heex`) now
+reads `"{host} via {station}"` (e.g. `"beam01 via de-falkenstein"`)
+instead of the bare host. `host_label/0` in `board_live.ex` reads
+`MACULA_STATION_SEEDS` from the OS environment at render time (the same
+var the container is already configured with, nothing new to
+provision) and extracts the short station name with a regex
+(`station-([a-z0-9-]+)\.macula\.io`); falls back to the bare host if
+the env var is unset (local dev, no mesh). `boards_live.ex` has its
+own separate `host_label/0` used only as the `owner` attribution string
+on newly-created boards -- deliberately left alone, unrelated to this
+display and changing it would alter stored board data for no reason
+the user asked for.
 
 ---
 
