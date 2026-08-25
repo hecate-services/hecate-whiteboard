@@ -79,7 +79,9 @@ defmodule QueryBoards.AnswerBoardSnapshotQueries do
         Logger.info("[AnswerBoardSnapshotQueries] reply #{board.board_id}: #{inspect(result)}")
 
       other ->
-        Logger.warning("[AnswerBoardSnapshotQueries] mesh_handles: #{inspect(other)}, dropping reply")
+        Logger.warning(
+          "[AnswerBoardSnapshotQueries] mesh_handles: #{inspect(other)}, dropping reply"
+        )
     end
   end
 

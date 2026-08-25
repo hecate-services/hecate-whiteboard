@@ -60,7 +60,8 @@ defmodule ProjectBoards.Store do
 
   # evoq delivers events in stream order per board, so the last call for
   # a given board_id IS its latest version -- no max-guard needed.
-  def note_stroke_version(board_id, version), do: :ets.insert(@board_stroke_versions, {board_id, version})
+  def note_stroke_version(board_id, version),
+    do: :ets.insert(@board_stroke_versions, {board_id, version})
 
   def stroke_version(board_id) do
     case :ets.lookup(@board_stroke_versions, board_id) do

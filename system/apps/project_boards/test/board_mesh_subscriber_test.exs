@@ -61,7 +61,13 @@ defmodule ProjectBoards.BoardMeshSubscriberTest do
     # more than once. Without the dedup guard this used to re-broadcast
     # (and, if the two deliveries ever differed in shape, double-insert)
     # on every redelivery.
-    payload = %{board_id: "board-duptest", stroke_id: "s3", points: [%{x: 1, y: 2}], color: "#f2efe6", width: 3}
+    payload = %{
+      board_id: "board-duptest",
+      stroke_id: "s3",
+      points: [%{x: 1, y: 2}],
+      color: "#f2efe6",
+      width: 3
+    }
 
     assert {:noreply, nil} = BoardMeshSubscriber.handle_event(@topic, payload, %{}, nil)
     assert {:noreply, nil} = BoardMeshSubscriber.handle_event(@topic, payload, %{}, nil)

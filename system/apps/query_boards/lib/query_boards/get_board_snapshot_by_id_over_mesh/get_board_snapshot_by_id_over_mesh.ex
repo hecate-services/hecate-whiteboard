@@ -44,7 +44,13 @@ defmodule QueryBoards.GetBoardSnapshotByIdOverMesh.GetBoardSnapshotByIdOverMesh 
   defp query(pool, realm, board_id, timeout_ms) do
     reply_topic = @reply_topic_prefix <> random_id()
 
-    case :macula_subscriber.start_link(QueryBoards.OneShotMeshReply, pool, realm, reply_topic, self()) do
+    case :macula_subscriber.start_link(
+           QueryBoards.OneShotMeshReply,
+           pool,
+           realm,
+           reply_topic,
+           self()
+         ) do
       {:ok, subscriber} ->
         publish_query(pool, realm, board_id, reply_topic)
         await_reply(subscriber, timeout_ms)

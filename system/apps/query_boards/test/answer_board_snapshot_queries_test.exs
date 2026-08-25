@@ -31,11 +31,23 @@ defmodule QueryBoards.AnswerBoardSnapshotQueriesTest do
 
   test "a query for a board this node has never seen doesn't crash" do
     payload = %{board_id: "board-neverheardofit", reply_to: "some-reply-topic"}
-    assert {:noreply, nil} = AnswerBoardSnapshotQueries.handle_event(AnswerBoardSnapshotQueries.topic(), payload, %{}, nil)
+
+    assert {:noreply, nil} =
+             AnswerBoardSnapshotQueries.handle_event(
+               AnswerBoardSnapshotQueries.topic(),
+               payload,
+               %{},
+               nil
+             )
   end
 
   test "ignores a payload for a different topic" do
     assert {:noreply, nil} =
-             AnswerBoardSnapshotQueries.handle_event("some.other.topic", %{board_id: "x"}, %{}, nil)
+             AnswerBoardSnapshotQueries.handle_event(
+               "some.other.topic",
+               %{board_id: "x"},
+               %{},
+               nil
+             )
   end
 end
