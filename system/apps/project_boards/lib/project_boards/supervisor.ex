@@ -24,8 +24,7 @@ defmodule ProjectBoards.Supervisor do
   use Supervisor
 
   alias ProjectBoards.BoardLifecycleToBoards.BoardLifecycleToBoards
-  alias ProjectBoards.ShapeMutatedToBoardShapes.ShapeMutatedToBoardShapes
-  alias ProjectBoards.StrokeDrawnV1ToBoardShapes.StrokeDrawnV1ToBoardShapes
+  alias ProjectBoards.ShapeLifecycleToBoardShapes.ShapeLifecycleToBoardShapes
 
   def start_link, do: Supervisor.start_link(__MODULE__, [], name: __MODULE__)
 
@@ -35,11 +34,9 @@ defmodule ProjectBoards.Supervisor do
       {Phoenix.PubSub, name: HecateWhiteboardWeb.PubSub},
       ProjectBoards.Store,
       handler(BoardLifecycleToBoards),
-      handler(StrokeDrawnV1ToBoardShapes),
-      handler(ShapeMutatedToBoardShapes),
+      handler(ShapeLifecycleToBoardShapes),
       {DynamicSupervisor, name: ProjectBoards.MeshSubscriberSupervisor, strategy: :one_for_one},
-      ProjectBoards.BoardMeshSubscriberStarter,
-      ProjectBoards.ShapeMeshSubscriberStarter,
+      ProjectBoards.ShapeLifecycleMeshSubscriberStarter,
       ProjectBoards.BoardLifecycleMeshSubscriberStarter
     ]
 

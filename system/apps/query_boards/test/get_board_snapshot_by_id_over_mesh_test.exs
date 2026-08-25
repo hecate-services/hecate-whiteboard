@@ -2,7 +2,7 @@ defmodule QueryBoards.GetBoardSnapshotByIdOverMeshTest do
   # The actual mesh round trip (query publish -> AnswerBoardSnapshotQueries
   # reply -> materialize) can only be exercised against a live pool -- this
   # dev/test sandbox genuinely cannot reach the mesh (same limitation noted
-  # for BoardMeshSubscriber's own live verification). What's testable here
+  # for ShapeLifecycleMeshSubscriber's own live verification). What's testable here
   # without one: the short-circuit when hecate_om has no pool yet.
   use ExUnit.Case, async: false
 
@@ -13,18 +13,19 @@ defmodule QueryBoards.GetBoardSnapshotByIdOverMeshTest do
              GetBoardSnapshotByIdOverMesh.call("board-nonexistent", 50)
   end
 
-  # Regression for a real bug found live 2026-08-26: normalize_shape/1 was
+  # Regression for a real bug found live 2026-08-25: normalize_shape/1 was
   # normalize_stroke/1, extracting only stroke_id/points/color/width --
   # correct back when a snapshot's `shapes` list held nothing but strokes,
   # silently wrong once sticky/text/geometry shapes existed. Every
   # non-stroke shape lost its kind/shape_id/text (replaced with a
-  # stroke_id that never existed for it, always nil).
+  # stroke_id that never existed for it, always nil). Now that
+  # shape_initiated_v1 unified shape creation, no row carries a
+  # `stroke_id` field at all -- normalize_shape/1 no longer produces one.
   describe "normalize_shape/1" do
     test "a stroke keeps its own fields" do
       stroke = %{
         kind: "stroke",
         shape_id: "s1",
-        stroke_id: "s1",
         points: [%{x: 1, y: 2}],
         color: "#f2efe6",
         width: 3
@@ -33,7 +34,6 @@ defmodule QueryBoards.GetBoardSnapshotByIdOverMeshTest do
       assert GetBoardSnapshotByIdOverMesh.normalize_shape(stroke) == %{
                kind: "stroke",
                shape_id: "s1",
-               stroke_id: "s1",
                points: [%{x: 1, y: 2}],
                color: "#f2efe6",
                width: 3,
@@ -53,7 +53,6 @@ defmodule QueryBoards.GetBoardSnapshotByIdOverMeshTest do
       assert GetBoardSnapshotByIdOverMesh.normalize_shape(sticky) == %{
                kind: "sticky",
                shape_id: "sticky1",
-               stroke_id: nil,
                points: [%{x: 84, y: 178}],
                color: "#f2994a",
                width: nil,
@@ -72,7 +71,6 @@ defmodule QueryBoards.GetBoardSnapshotByIdOverMeshTest do
       assert GetBoardSnapshotByIdOverMesh.normalize_shape(rectangle) == %{
                kind: "rectangle",
                shape_id: "rect1",
-               stroke_id: nil,
                points: [%{x: 53, y: 39}, %{x: 280, y: 110}],
                color: "#f2efe6",
                width: nil,
@@ -96,7 +94,6 @@ defmodule QueryBoards.GetBoardSnapshotByIdOverMeshTest do
       assert GetBoardSnapshotByIdOverMesh.normalize_shape(sticky) == %{
                kind: "sticky",
                shape_id: "sticky2",
-               stroke_id: nil,
                points: [%{x: 10, y: 20}],
                color: "#f2994a",
                width: nil,

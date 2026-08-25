@@ -2,7 +2,7 @@ defmodule GuideBoardLifecycle.MoveShape.MaybeMoveShape do
   # Handler for move_shape_v1 -- mirrors MaybePlaceSticky's shape.
   alias GuideBoardLifecycle.BoardAggregate
   alias GuideBoardLifecycle.MoveShape.MoveShapeV1
-  alias GuideBoardLifecycle.MoveShape.ShapeMovedV1
+  alias GuideBoardLifecycle.ShapeLifecycle.ShapeAmendedV1
   alias GuideBoardLifecycle.ShapeMutation.AnswerShapeMutationRequests
 
   require Logger
@@ -15,8 +15,8 @@ defmodule GuideBoardLifecycle.MoveShape.MaybeMoveShape do
   end
 
   def handle(%MoveShapeV1{} = cmd) do
-    event = ShapeMovedV1.from_command(cmd)
-    {:ok, [ShapeMovedV1.to_map(event)]}
+    event = ShapeAmendedV1.from_command(cmd)
+    {:ok, [ShapeAmendedV1.to_map(event)]}
   end
 
   def dispatch(%{board_id: board_id} = params) do

@@ -1353,6 +1353,91 @@ Map.keys(@remote_board_facts)` on every mount/async-discovery/mesh-event
 tick -- subscribe to newly-seen board_ids, unsubscribe from ones that
 drop out (archived, etc.) -- instead of the fixed timer.
 
+### Event consolidation: `shape_initiated_v1`/`shape_amended_v1` — DONE 2026-08-26
+
+Follow-up, next session, triggered by a live bug report: "msi00's LinkedIn
+Demo board is not consistent with the rest." Root-caused to
+`GetBoardSnapshotByIdOverMesh`'s `normalize_stroke/1` only ever handling
+stroke fields — a rectangle went missing entirely and a sticky lost its
+kind/shape_id/text, because the snapshot path had four near-identical
+shape-creation event types (`stroke_drawn_v1`, `sticky_placed_v1`,
+`text_placed_v1`, `geometry_drawn_v1`) each needing its own field mapping,
+and the mapping only ever got written for strokes. Fixed narrowly first
+(see the CHANGELOG's "real data-loss/corruption bug in `join_board`'s mesh
+snapshot" entry) — then the user asked directly whether the underlying
+fact should be emitted uniformly instead: "could the consistency fact be
+emitted at the moment a shape is dropped on the canvas and again when
+editted (perhaps shape_initiated, shape_ammended) events/facts. thoughts?"
+Recommended consolidating all four creation events into one
+`shape_initiated_v1` (kind as data) and renaming `shape_moved_v1` to
+`shape_amended_v1`, mirroring `board_initiated_v1`/`board_hosted_v1`'s own
+`{subject}_{verb_past}_v{N}` shape — approved with "build it."
+
+Clean cutover, no dual-read: this workspace's own no-backward-compatibility
+rule, and nothing here is in production. Touched both departments:
+
+- CMD (`guide_board_lifecycle`): `ShapeLifecycle.ShapeInitiatedV1`/
+  `ShapeAmendedV1` replace `DrawStroke.StrokeDrawnV1`,
+  `PlaceSticky.StickyPlacedV1`, `PlaceText.TextPlacedV1`,
+  `DrawGeometry.GeometryDrawnV1`, `MoveShape.ShapeMovedV1`. Each creation
+  desk's `Maybe*.handle/1` now builds `ShapeInitiatedV1.new(%{kind: ...})`
+  instead of its own distinct event struct; `MaybeMoveShape` builds
+  `ShapeAmendedV1.from_command/1`. `ShapeLifecycle.ShapeLifecycleV1ToMesh`
+  replaces `StrokeDrawnV1ToMesh` (dedicated topic) and
+  `ShapeMutation.ShapeMutatedV1ToMesh` (shared topic) with three topics,
+  one per event type — `BoardLifecycleV1ToMesh`'s own precedent (distinct
+  facts get distinct topics), explicitly NOT `ShapeMutatedV1ToMesh`'s old
+  shared-topic design (there the five mutation event types were genuine
+  siblings of "what's drawn changed"; creation and amendment are not
+  siblings of each other). `board_aggregate.ex` and
+  `answer_shape_mutation_requests.ex` needed no changes at all — both
+  route by `command_type` (atom/string), never by the event a command
+  happens to produce, so the whole rename is invisible to them.
+- PRJ (`project_boards`): `ShapeLifecycleToBoardShapes` (local projection)
+  and `ShapeLifecycleMeshSubscriber`+`Starter` (remote replication) replace
+  four writers — `StrokeDrawnV1ToBoardShapes`, `ShapeMutatedToBoardShapes`,
+  `BoardMeshSubscriber`, `ShapeMeshSubscriber` — with two, each doing one
+  generic field extraction (`kind`/`shape_id`/`points`/`color`/`width`/
+  `text`) instead of a per-kind dispatch. Both keep the existing
+  `Store.new_shape?/1` catchup-redelivery guard on the creation path only
+  (amend/remove act on an already-stored row via find-then-replace, safe
+  to repeat). `Store`'s version-tracking table renamed
+  `board_shape_versions` (`shape_version/1`, `note_shape_version/2`, was
+  `board_stroke_versions`/`stroke_version`/`note_stroke_version`) to match
+  what it actually tracks now.
+- QRY (`query_boards`): `GetBoardSnapshotById` and
+  `GetBoardSnapshotByIdOverMesh` updated to call the renamed `Store`
+  functions. `normalize_shape/1` (the function the original bug lived in)
+  simplified further: the `stroke_id` field and its fallback are gone
+  entirely, not just deprioritized — confirmed by grep that no consumer
+  anywhere (JS client, any Elixir module) ever read it as distinct from
+  `shape_id`, and the new unified event never produces one.
+
+**One real, accepted consequence:** boards already live on the demo fleet
+with shapes created under the old event types will lose those shapes from
+the read model on the next restart/catchup after this deploys — the new
+projection's `interested_in/0` no longer lists the old event type strings,
+so evoq's catch-up replay simply has no handler for them anymore. The
+event LOG itself is untouched (evoq is append-only; the old events are
+still there forever), only the read-model projection stops consuming them.
+Flagged plainly rather than absorbed silently, per this being a genuine
+throwaway-infra tradeoff the user should see, not discover.
+
+**Verified locally before deploy:** `mix compile` (0 warnings), `mix test`
+(64 tests, 0 failures across all four apps), `mix format
+--check-formatted` (clean), full local `docker build` (release assembles
+cleanly). Live end-to-end in a real browser against a fresh local server
+(`/tmp/hecate-whiteboard-dev` cleared first): drew a stroke, a rectangle,
+and a sticky with text — all three round-tripped through
+`shape_initiated_v1` → the new projection → a full page reload correctly.
+Dragged the rectangle (`shape_amended_v1`) — moved and stayed moved after
+reload. Selected the sticky with a plain click (no drag) and pressed a
+real Escape key — deselected without moving or deleting it, confirming
+the ESC-cancel fix from the prior session still holds under the new event
+scheme. Deleted the rectangle (`shape_removed_v1`) — gone, and stayed gone
+after reload. Server log confirmed `ShapeLifecycleV1ToMesh` fired for both
+the `draw_geometry` and `place_sticky` dispatches.
+
 ---
 
 ## Nothing is committed anywhere

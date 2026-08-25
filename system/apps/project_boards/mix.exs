@@ -32,8 +32,8 @@ defmodule ProjectBoards.MixProject do
       # LiveViews subscribe and react; they never call this app directly.
       # See macula-io/CLAUDE.md's "Phoenix LiveView Architecture" rule.
       {:phoenix_pubsub, "~> 2.3"},
-      # For BoardMeshSubscriber: :hecate_om.mesh_handles/0 and
-      # :macula_subscriber directly.
+      # For ShapeLifecycleMeshSubscriber/BoardLifecycleMeshSubscriber:
+      # :hecate_om.mesh_handles/0 and :macula_subscriber directly.
       {:hecate_om, "~> 0.14.2"},
       {:macula, "~> 10.1"}
     ]

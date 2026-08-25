@@ -5,7 +5,7 @@ defmodule GuideBoardLifecycle.DrawGeometry.MaybeDrawGeometry do
   # not a separate feature like draw_stroke vs rename_board.
   alias GuideBoardLifecycle.BoardAggregate
   alias GuideBoardLifecycle.DrawGeometry.DrawGeometryV1
-  alias GuideBoardLifecycle.DrawGeometry.GeometryDrawnV1
+  alias GuideBoardLifecycle.ShapeLifecycle.ShapeInitiatedV1
   alias GuideBoardLifecycle.ShapeMutation.AnswerShapeMutationRequests
 
   require Logger
@@ -18,8 +18,16 @@ defmodule GuideBoardLifecycle.DrawGeometry.MaybeDrawGeometry do
   end
 
   def handle(%DrawGeometryV1{} = cmd) do
-    event = GeometryDrawnV1.from_command(cmd)
-    {:ok, [GeometryDrawnV1.to_map(event)]}
+    event =
+      ShapeInitiatedV1.new(%{
+        board_id: DrawGeometryV1.board_id(cmd),
+        shape_id: DrawGeometryV1.shape_id(cmd),
+        kind: DrawGeometryV1.kind(cmd),
+        points: DrawGeometryV1.points(cmd),
+        color: DrawGeometryV1.color(cmd)
+      })
+
+    {:ok, [ShapeInitiatedV1.to_map(event)]}
   end
 
   def dispatch(%{board_id: board_id} = params) do

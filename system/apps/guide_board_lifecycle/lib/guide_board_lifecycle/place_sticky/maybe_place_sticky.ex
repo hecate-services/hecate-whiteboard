@@ -8,7 +8,7 @@ defmodule GuideBoardLifecycle.PlaceSticky.MaybePlaceSticky do
   # so the plumbing is shared while each stays its own CMD desk.
   alias GuideBoardLifecycle.BoardAggregate
   alias GuideBoardLifecycle.PlaceSticky.PlaceStickyV1
-  alias GuideBoardLifecycle.PlaceSticky.StickyPlacedV1
+  alias GuideBoardLifecycle.ShapeLifecycle.ShapeInitiatedV1
   alias GuideBoardLifecycle.ShapeMutation.AnswerShapeMutationRequests
 
   require Logger
@@ -21,8 +21,17 @@ defmodule GuideBoardLifecycle.PlaceSticky.MaybePlaceSticky do
   end
 
   def handle(%PlaceStickyV1{} = cmd) do
-    event = StickyPlacedV1.from_command(cmd)
-    {:ok, [StickyPlacedV1.to_map(event)]}
+    event =
+      ShapeInitiatedV1.new(%{
+        board_id: PlaceStickyV1.board_id(cmd),
+        shape_id: PlaceStickyV1.shape_id(cmd),
+        kind: "sticky",
+        points: [%{x: PlaceStickyV1.x(cmd), y: PlaceStickyV1.y(cmd)}],
+        color: PlaceStickyV1.color(cmd),
+        text: PlaceStickyV1.text(cmd)
+      })
+
+    {:ok, [ShapeInitiatedV1.to_map(event)]}
   end
 
   def dispatch(%{board_id: board_id} = params) do

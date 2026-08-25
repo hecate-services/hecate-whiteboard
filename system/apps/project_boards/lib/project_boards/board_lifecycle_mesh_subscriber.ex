@@ -34,9 +34,9 @@ defmodule ProjectBoards.BoardLifecycleMeshSubscriber do
       # Built explicitly, atom-keyed, rather than re-broadcasting `raw`
       # as-is -- normalize/1 only unwraps {:text, _} VALUES, it leaves
       # {:text, _}-tagged KEYS as plain strings (mirrors
-      # BoardMeshSubscriber's own stroke-map construction, same reason:
-      # a consumer that always does fact.board_id/fact[:title] would
-      # silently get nil half the time otherwise).
+      # ShapeLifecycleMeshSubscriber's own shape-map construction, same
+      # reason: a consumer that always does fact.board_id/fact[:title]
+      # would silently get nil half the time otherwise).
       fact = %{
         board_id: field(:board_id, raw),
         title: field(:title, raw),
@@ -63,7 +63,7 @@ defmodule ProjectBoards.BoardLifecycleMeshSubscriber do
   end
 
   # Same atom-vs-{text, Bin} tolerance as every other mesh subscriber
-  # here (BoardMeshSubscriber, ShapeMeshSubscriber) -- see
+  # here (ShapeLifecycleMeshSubscriber) -- see
   # reference_macula_rpc_stream_args_atom_keys for why both shapes are
   # possible depending on what this VM already had loaded.
   defp normalize({:text, b}) when is_binary(b), do: b

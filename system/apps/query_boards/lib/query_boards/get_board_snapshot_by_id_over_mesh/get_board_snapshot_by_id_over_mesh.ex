@@ -101,7 +101,7 @@ defmodule QueryBoards.GetBoardSnapshotByIdOverMesh.GetBoardSnapshotByIdOverMesh 
     |> Enum.filter(&Store.new_shape?(&1.shape_id))
     |> Enum.each(&:ets.insert(Store.board_shapes_table(), {board_id, &1}))
 
-    Store.note_stroke_version(board_id, field(:as_of_version, fact) || 0)
+    Store.note_shape_version(board_id, field(:as_of_version, fact) || 0)
 
     # Read back through the same desk the local-host mount path uses, so
     # both of BoardLive's mount branches return an identical shape.
@@ -109,27 +109,27 @@ defmodule QueryBoards.GetBoardSnapshotByIdOverMesh.GetBoardSnapshotByIdOverMesh 
   end
 
   # A snapshot's `shapes` list is every kind (stroke/sticky/text/
-  # rectangle/ellipse/triangle) mixed together, not just strokes -- this
-  # used to be normalize_stroke/1, extracting only stroke_id/points/
-  # color/width, from back when join_board predated any non-stroke
-  # shape. Left unfixed, every non-stroke shape came out with kind,
-  # shape_id, and text silently dropped (replaced by a stroke_id that
-  # never existed for it, always nil), AND all but the FIRST such shape
-  # in the list vanished outright: new_shape?(nil) is only true once, so
-  # every non-stroke shape after the first collided on the same nil key
-  # and got filtered out as an apparent "redelivery". Found live:
-  # msi00's join snapshot of a board with a rectangle and four stickies
-  # came back with the rectangle missing entirely and only one
-  # corrupted, textless sticky surviving.
+  # rectangle/ellipse/triangle) mixed together -- this used to be
+  # normalize_stroke/1, extracting only stroke_id/points/color/width, from
+  # back when join_board predated any non-stroke shape. Left unfixed,
+  # every non-stroke shape came out with kind, shape_id, and text silently
+  # dropped (replaced by a stroke_id that never existed for it, always
+  # nil), AND all but the FIRST such shape in the list vanished outright:
+  # new_shape?(nil) is only true once, so every non-stroke shape after the
+  # first collided on the same nil key and got filtered out as an
+  # apparent "redelivery". Found live: msi00's join snapshot of a board
+  # with a rectangle and four stickies came back with the rectangle
+  # missing entirely and only one corrupted, textless sticky surviving.
+  #
+  # No `stroke_id` fallback anymore -- shape_initiated_v1 never produces
+  # one (confirmed by grep: nothing downstream ever read it as distinct
+  # from shape_id), so a bare `field(:shape_id, shape)` is now sufficient.
   #
   # Exported for testing only -- pure, no store or mesh needed.
   def normalize_shape(shape) do
-    shape_id = field(:shape_id, shape) || field(:stroke_id, shape)
-
     %{
-      kind: field(:kind, shape) || "stroke",
-      shape_id: shape_id,
-      stroke_id: field(:stroke_id, shape),
+      kind: field(:kind, shape),
+      shape_id: field(:shape_id, shape),
       points: field(:points, shape),
       color: field(:color, shape),
       width: field(:width, shape),
@@ -138,7 +138,7 @@ defmodule QueryBoards.GetBoardSnapshotByIdOverMesh.GetBoardSnapshotByIdOverMesh 
   end
 
   # Same atom/{text,_} tolerance as every other mesh-facing module here --
-  # see BoardMeshSubscriber's header comment for the full explanation.
+  # see ShapeLifecycleMeshSubscriber's header comment for the full explanation.
   defp field(key, map) when is_atom(key) do
     Map.get(map, key, Map.get(map, Atom.to_string(key)))
   end

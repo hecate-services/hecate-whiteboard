@@ -1,8 +1,8 @@
 defmodule GuideBoardLifecycle.DrawStroke.AnswerDrawStrokeRequestsStarter do
   # Starts AnswerDrawStrokeRequests once the shared mesh pool is up, then
-  # stops retrying -- mirrors ProjectBoards.BoardMeshSubscriberStarter/
+  # stops retrying -- mirrors ProjectBoards.ShapeLifecycleMeshSubscriberStarter/
   # QueryBoards.AnswerBoardSnapshotQueriesStarter exactly. First INBOUND
-  # mesh subscriber in this app -- StrokeDrawnV1ToMesh only ever
+  # mesh subscriber in this app -- ShapeLifecycleV1ToMesh only ever
   # publishes outbound, so this needs its own DynamicSupervisor rather
   # than reaching into another app's.
   use GenServer

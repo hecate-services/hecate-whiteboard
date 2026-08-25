@@ -213,6 +213,48 @@ Versioning: [SemVer](https://semver.org/).
   confirmed correct by reading `HANDLE EVENT` counts and payloads
   straight from the server log, not just visually.
 
+- `shape_initiated_v1`/`shape_amended_v1`: collapsed the four separate
+  shape-creation event types (`stroke_drawn_v1`, `sticky_placed_v1`,
+  `text_placed_v1`, `geometry_drawn_v1`) into one `shape_initiated_v1`,
+  and renamed `shape_moved_v1` to `shape_amended_v1` -- same
+  `{subject}_{verb_past}_v{N}` shape as `board_initiated_v1`/
+  `board_hosted_v1`, applied to shapes instead of boards. Directly
+  motivated by the msi00 snapshot bug above: four near-identical event
+  types each needing their own per-kind field mapping is exactly the
+  shape that let a mapping silently drift out of sync for one kind while
+  the others stayed correct. With one event type there is only one place
+  to get the mapping right. Each creation desk's `Maybe*` handler now
+  builds a `ShapeInitiatedV1` carrying `kind` as data instead of a
+  distinct event struct/module; `MaybeMoveShape` builds `ShapeAmendedV1`.
+  `GuideBoardLifecycle.ShapeLifecycle.ShapeLifecycleV1ToMesh` replaces
+  the two old mesh emitters (`StrokeDrawnV1ToMesh`'s own topic,
+  `ShapeMutatedV1ToMesh`'s shared one) with three topics, one per event
+  type -- same one-topic-per-fact precedent as `BoardLifecycleV1ToMesh`,
+  not `ShapeMutatedV1ToMesh`'s old shared-topic design (there the five
+  event types were genuine siblings of "what's drawn changed"; shape
+  creation and shape amendment are not siblings of each other).
+  `ProjectBoards.ShapeLifecycleToBoardShapes` (local projection) and
+  `ProjectBoards.ShapeLifecycleMeshSubscriber` (remote replication)
+  replace `StrokeDrawnV1ToBoardShapes`/`ShapeMutatedToBoardShapes`/
+  `BoardMeshSubscriber`/`ShapeMeshSubscriber` -- four writers collapsed
+  to two, each now doing one generic field extraction instead of a
+  per-kind dispatch. `Store`'s version-tracking table is renamed
+  `board_shape_versions` (`shape_version`/`note_shape_version`, was
+  `board_stroke_versions`) to match. The `stroke_id` field is gone
+  entirely, not just deprioritized -- confirmed by grep that nothing
+  downstream (JS client, any Elixir module) ever read it as distinct
+  from `shape_id`.
+  Clean cutover, no dual-read/migration: this is throwaway dev/demo
+  infra and nothing is in production, per this workspace's own
+  no-backward-compatibility rule. One real consequence -- boards
+  currently live on the demo fleet with shapes created under the old
+  event types (`stroke_drawn_v1` etc.) will lose those shapes from the
+  read model on the next restart/catchup after this deploys, since the
+  new projection's `interested_in/0` no longer lists the old event type
+  strings. The event LOG itself is untouched (evoq's append-only store
+  keeps the old events forever); only the read-model projection stops
+  consuming them.
+
 ### Fixed
 
 - Escape genuinely did nothing for the most common case: a shape

@@ -194,7 +194,7 @@ defmodule GuideBoardLifecycle.BoardAggregateTest do
                width: 3
              })
 
-    assert drawn.event_type == "stroke_drawn_v1"
+    assert drawn.event_type == "shape_initiated_v1"
   end
 
   test "unknown command is rejected" do
@@ -347,7 +347,7 @@ defmodule GuideBoardLifecycle.BoardAggregateTest do
                text: "hello"
              })
 
-    assert placed.event_type == "sticky_placed_v1"
+    assert placed.event_type == "shape_initiated_v1"
   end
 
   test "place_text rejects a board that isn't hosted here" do
@@ -404,7 +404,7 @@ defmodule GuideBoardLifecycle.BoardAggregateTest do
                text: "hello"
              })
 
-    assert placed.event_type == "text_placed_v1"
+    assert placed.event_type == "shape_initiated_v1"
   end
 
   test "move_shape rejects a board that isn't hosted here" do
@@ -455,7 +455,7 @@ defmodule GuideBoardLifecycle.BoardAggregateTest do
                points: [%{x: 5, y: 5}]
              })
 
-    assert moved.event_type == "shape_moved_v1"
+    assert moved.event_type == "shape_amended_v1"
   end
 
   test "remove_shape rejects a board that isn't hosted here" do
@@ -594,7 +594,7 @@ defmodule GuideBoardLifecycle.BoardAggregateTest do
                color: "#f2efe6"
              })
 
-    assert drawn.event_type == "geometry_drawn_v1"
+    assert drawn.event_type == "shape_initiated_v1"
   end
 
   test "draw_geometry rejects an archived board" do

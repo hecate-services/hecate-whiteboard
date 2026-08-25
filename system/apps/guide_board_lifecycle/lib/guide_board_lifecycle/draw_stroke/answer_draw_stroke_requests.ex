@@ -8,8 +8,8 @@ defmodule GuideBoardLifecycle.DrawStroke.AnswerDrawStrokeRequests do
   # {:error, :not_hosted} (or the board doesn't exist locally at all,
   # same result), and the request is silently dropped. On the real host
   # it succeeds exactly like a local draw would, and the normal
-  # stroke_drawn_v1 -> StrokeDrawnV1ToMesh -> BoardMeshSubscriber path
-  # carries it back out to every peer, including whoever relayed it --
+  # shape_initiated_v1 -> ShapeLifecycleV1ToMesh -> ShapeLifecycleMeshSubscriber
+  # path carries it back out to every peer, including whoever relayed it --
   # no reply needed here at all, the confirmation IS the replicated
   # stroke arriving through the path a joining peer already watches to
   # view the board in the first place.

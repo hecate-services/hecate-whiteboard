@@ -3,7 +3,7 @@ defmodule GuideBoardLifecycle.DrawStroke.MaybeDrawStroke do
   alias GuideBoardLifecycle.BoardAggregate
   alias GuideBoardLifecycle.DrawStroke.AnswerDrawStrokeRequests
   alias GuideBoardLifecycle.DrawStroke.DrawStrokeV1
-  alias GuideBoardLifecycle.DrawStroke.StrokeDrawnV1
+  alias GuideBoardLifecycle.ShapeLifecycle.ShapeInitiatedV1
 
   require Logger
 
@@ -15,8 +15,17 @@ defmodule GuideBoardLifecycle.DrawStroke.MaybeDrawStroke do
   end
 
   def handle(%DrawStrokeV1{} = cmd) do
-    event = StrokeDrawnV1.from_command(cmd)
-    {:ok, [StrokeDrawnV1.to_map(event)]}
+    event =
+      ShapeInitiatedV1.new(%{
+        board_id: DrawStrokeV1.board_id(cmd),
+        shape_id: DrawStrokeV1.stroke_id(cmd),
+        kind: "stroke",
+        points: DrawStrokeV1.points(cmd),
+        color: DrawStrokeV1.color(cmd),
+        width: DrawStrokeV1.width(cmd)
+      })
+
+    {:ok, [ShapeInitiatedV1.to_map(event)]}
   end
 
   def dispatch(%{board_id: board_id} = params) do

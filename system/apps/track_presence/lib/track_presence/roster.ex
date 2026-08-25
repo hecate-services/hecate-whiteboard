@@ -13,7 +13,7 @@ defmodule TrackPresence.Roster do
   # the row, broadcasts locally, AND publishes to mesh. absorb_remote/1 is
   # for a fact arriving FROM the mesh -- writes the row and broadcasts
   # locally only, never re-publishes. That asymmetry is what keeps this
-  # loop-free, same trick BoardMeshSubscriber uses for strokes.
+  # loop-free, same trick ShapeLifecycleMeshSubscriber uses for shapes.
   use GenServer
 
   require Logger

@@ -14,10 +14,10 @@ defmodule QueryBoards.GetBoardSnapshotById.GetBoardSnapshotById do
           |> Enum.map(fn {_id, stroke} -> stroke end)
 
         # join_board's late-join reconciliation: a joining client drops any
-        # buffered live stroke event at or below this version, since the
-        # snapshot already reflects it -- see ProjectBoards.Store's module
-        # doc for why only strokes need to be tracked here.
-        as_of_version = Store.stroke_version(board_id)
+        # buffered live shape_initiated_v1 event at or below this version,
+        # since the snapshot already reflects it -- see ProjectBoards.Store's
+        # module doc for why only shape_initiated_v1 needs to be tracked here.
+        as_of_version = Store.shape_version(board_id)
 
         {:ok,
          %{

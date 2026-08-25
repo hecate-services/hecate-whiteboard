@@ -31,7 +31,7 @@ defmodule GuideBoardLifecycle.MixProject do
       # this app mints stream ids straight from its own command constructors,
       # mirroring hecate-tube's guide_tube_lifecycle.
       {:reckon_gater, "~> 3.11"},
-      # For the stroke_drawn_v1_to_mesh emitter: :hecate_om.mesh_handles/0
+      # For the shape_lifecycle_v1_to_mesh emitter: :hecate_om.mesh_handles/0
       # and :macula_publisher directly, same reasoning as reckon_gater above.
       {:hecate_om, "~> 0.14.2"},
       {:macula, "~> 10.1"}

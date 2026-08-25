@@ -2,7 +2,7 @@ defmodule GuideBoardLifecycle.PlaceText.MaybePlaceText do
   # Handler for place_text_v1 -- mirrors MaybePlaceSticky's shape exactly.
   alias GuideBoardLifecycle.BoardAggregate
   alias GuideBoardLifecycle.PlaceText.PlaceTextV1
-  alias GuideBoardLifecycle.PlaceText.TextPlacedV1
+  alias GuideBoardLifecycle.ShapeLifecycle.ShapeInitiatedV1
   alias GuideBoardLifecycle.ShapeMutation.AnswerShapeMutationRequests
 
   require Logger
@@ -15,8 +15,17 @@ defmodule GuideBoardLifecycle.PlaceText.MaybePlaceText do
   end
 
   def handle(%PlaceTextV1{} = cmd) do
-    event = TextPlacedV1.from_command(cmd)
-    {:ok, [TextPlacedV1.to_map(event)]}
+    event =
+      ShapeInitiatedV1.new(%{
+        board_id: PlaceTextV1.board_id(cmd),
+        shape_id: PlaceTextV1.shape_id(cmd),
+        kind: "text",
+        points: [%{x: PlaceTextV1.x(cmd), y: PlaceTextV1.y(cmd)}],
+        color: PlaceTextV1.color(cmd),
+        text: PlaceTextV1.text(cmd)
+      })
+
+    {:ok, [ShapeInitiatedV1.to_map(event)]}
   end
 
   def dispatch(%{board_id: board_id} = params) do

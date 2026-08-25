@@ -34,8 +34,8 @@ defmodule TrackPresence.CursorMeshSubscriber do
   def handle_event(_topic, _payload, _meta, state), do: {:noreply, state}
 
   # Same atom-vs-{text,_} tolerance every mesh receiver in this repo
-  # needs -- see ProjectBoards.BoardMeshSubscriber's own comment for the
-  # full story.
+  # needs -- see ProjectBoards.ShapeLifecycleMeshSubscriber's own comment
+  # for the full story.
   defp field(key, map) when is_atom(key) do
     Map.get(map, key, Map.get(map, Atom.to_string(key)))
   end

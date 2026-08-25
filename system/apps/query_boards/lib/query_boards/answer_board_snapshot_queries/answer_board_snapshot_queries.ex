@@ -2,11 +2,11 @@ defmodule QueryBoards.AnswerBoardSnapshotQueries do
   # Host half of join_board's mesh discovery. Permanently subscribed to
   # the fixed board_snapshot_query_v1 topic; every host on the mesh gets
   # every query (board_id lives in the payload, not the topic, same
-  # convention as StrokeDrawnV1ToMesh/BoardMeshSubscriber). Only a node
-  # that actually hosts the requested board_id answers.
+  # convention as ShapeLifecycleV1ToMesh/ShapeLifecycleMeshSubscriber). Only
+  # a node that actually hosts the requested board_id answers.
   #
   # "Actually hosts" is decided by GetBoardSnapshotById returning a row at
-  # all: BoardMeshSubscriber only ever writes into board_shapes (strokes),
+  # all: ShapeLifecycleMeshSubscriber only ever writes into board_shapes,
   # never into the boards table, so a pure mesh-replica peer that has
   # never itself run initiate_board/host_board for this board_id has NO
   # boards row and GetBoardSnapshotById correctly reports :not_found for

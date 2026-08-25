@@ -15,18 +15,16 @@ defmodule GuideBoardLifecycle.Supervisor do
   alias GuideBoardLifecycle.DrawStroke.AnswerDrawStrokeRequestsStarter
   alias GuideBoardLifecycle.LeaveBoard.AnswerLeaveBoardRequestsStarter
   alias GuideBoardLifecycle.LeaveBoard.PeerDepartedV1ToMesh
+  alias GuideBoardLifecycle.ShapeLifecycle.ShapeLifecycleV1ToMesh
   alias GuideBoardLifecycle.ShapeMutation.AnswerShapeMutationRequestsStarter
-  alias GuideBoardLifecycle.ShapeMutation.ShapeMutatedV1ToMesh
-  alias GuideBoardLifecycle.StrokeDrawnV1ToMesh.StrokeDrawnV1ToMesh
 
   def start_link, do: Supervisor.start_link(__MODULE__, [], name: __MODULE__)
 
   @impl true
   def init([]) do
     children = [
-      handler(StrokeDrawnV1ToMesh),
+      handler(ShapeLifecycleV1ToMesh),
       handler(PeerDepartedV1ToMesh),
-      handler(ShapeMutatedV1ToMesh),
       handler(BoardLifecycleV1ToMesh),
       {DynamicSupervisor,
        name: GuideBoardLifecycle.MeshSubscriberSupervisor, strategy: :one_for_one},
