@@ -11,10 +11,14 @@ for the full design.
 
 ## Status
 
-Walking skeleton. `guide_board_lifecycle` can `initiate_board` and
-`archive_board` -- boot, mesh join, health, and the CQRS wiring are
-proven end to end, nothing else yet. Drawing, presence, and the LiveView
-canvas are later phases; see the plan doc's suggested build order.
+You can host a board and draw on it. `initiate_board`, `host_board`,
+`archive_board`, and `draw_stroke` are wired end to end -- boot, mesh
+join, health, CQRS, and a real Phoenix LiveView canvas. Strokes persist
+(reload the page, they're still there) and sync live across browser tabs
+on the same host. Not yet multi-peer over mesh: sync today is local
+Phoenix.PubSub, not macula pubsub -- a second peer on a different node
+can't join a board yet. `join_board`, presence, and `move_shape`/
+`remove_shape` are next; see the plan doc's suggested build order.
 
 ## Architecture
 
@@ -24,11 +28,17 @@ Elixir/Phoenix umbrella under `system/`, mirroring `macula-realm`'s own
 | App | Department | Owns |
 |---|---|---|
 | `hecate_whiteboard` | -- | `hecate_om_service` implementation: mesh join, identity, health |
-| `guide_board_lifecycle` | CMD | The `board` aggregate: `initiate_board`, `archive_board` (more desks to come) |
+| `guide_board_lifecycle` | CMD | The `board` aggregate: `initiate_board`, `host_board`, `draw_stroke`, `archive_board` |
+| `project_boards` | PRJ | ETS-backed `boards`/`board_shapes` read models, broadcasts writes over Phoenix.PubSub |
+| `query_boards` | QRY | `get_board_snapshot_by_id` |
+| `hecate_whiteboard_web` | -- | Phoenix/LiveView canvas UI |
 
 `hecate_om`, `evoq`, and `macula` are ordinary hex dependencies, called
 directly (`:hecate_om.boot/1`, `:evoq_router.dispatch/1`) -- no wrapper
-modules, per this workspace's house style.
+modules, per this workspace's house style. The canvas is plain HTML5
+Canvas with a hand-rolled quadratic-curve smoother, not Konva -- no
+object-model need (dragging, selection) until `move_shape`/`remove_shape`
+exist, and no npm dependency at all as a result.
 
 ## Running locally
 
@@ -47,6 +57,16 @@ with dev-safe defaults (see `config/runtime.exs`).
 ```bash
 mix test              # pure unit tests, no live dispatch
 mix format --check-formatted
+```
+
+To actually see the board:
+
+```bash
+mix esbuild.install --if-missing
+mix esbuild hecate_whiteboard_web
+mix esbuild hecate_whiteboard_web_css
+HECATE_DATA_DIR=/tmp/hecate-whiteboard-dev mix phx.server
+# open http://localhost:4000
 ```
 
 ## Deployment
