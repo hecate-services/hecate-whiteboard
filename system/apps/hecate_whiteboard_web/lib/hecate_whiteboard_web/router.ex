@@ -21,5 +21,9 @@ defmodule HecateWhiteboardWeb.Router do
     # node -- BoardLive's mount/3 tells the two apart. "/" keeps its
     # existing behaviour (the fixed default board, auto-hosted) untouched.
     live("/board/:board_id", BoardLive)
+    # The picker: every board this node hosts, plus a form to start a
+    # new one. See BoardsLive's own header for why it doesn't also try
+    # to surface boards other peers host.
+    live("/boards", BoardsLive)
   end
 end

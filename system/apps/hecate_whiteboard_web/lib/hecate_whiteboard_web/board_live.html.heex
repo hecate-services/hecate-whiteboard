@@ -1,6 +1,8 @@
 <div class="app">
   <header class="topbar">
-    <div class="brand">hecate<span class="brand-dim">-whiteboard</span></div>
+    <a href="/boards" class="brand" title="All boards hosted here">
+      hecate<span class="brand-dim">-whiteboard</span>
+    </a>
     <div class="board-title">{@board_title}</div>
     <div class="status" title="This board is hosted on this node. There is no other server.">
       <span class={"dot #{if @can_draw?, do: "dot-live", else: "dot-wait"}"}></span>

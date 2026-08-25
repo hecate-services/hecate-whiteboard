@@ -1,0 +1,38 @@
+<div class="app boards-page">
+  <header class="topbar">
+    <div class="brand">hecate<span class="brand-dim">-whiteboard</span></div>
+    <div class="board-title">Boards hosted here</div>
+  </header>
+
+  <main class="boards-main">
+    <form phx-submit="create" class="new-board-form">
+      <input
+        type="text"
+        name="title"
+        placeholder="New board title"
+        autocomplete="off"
+        maxlength="120"
+      />
+      <button type="submit">+ New board</button>
+    </form>
+
+    <%= if @boards == [] do %>
+      <div class="boards-empty">
+        <span>No boards hosted here yet. Start one above.</span>
+      </div>
+    <% else %>
+      <ul class="board-list">
+        <li :for={board <- @boards} class="board-card">
+          <a href={"/board/" <> board.board_id}>
+            <span class="board-card-title">{board.title}</span>
+            <span class="board-card-meta">
+              <span class="mono">{board.owner}</span>
+              <span class="status-sep">·</span>
+              {board.stroke_count} {if board.stroke_count == 1, do: "stroke", else: "strokes"}
+            </span>
+          </a>
+        </li>
+      </ul>
+    <% end %>
+  </main>
+</div>
