@@ -10,6 +10,7 @@ defmodule GuideBoardLifecycle.BoardAggregate do
   alias GuideBoardLifecycle.DrawStroke.MaybeDrawStroke
   alias GuideBoardLifecycle.HostBoard.MaybeHostBoard
   alias GuideBoardLifecycle.InitiateBoard.MaybeInitiateBoard
+  alias GuideBoardLifecycle.RenameBoard.MaybeRenameBoard
 
   @impl true
   def state_module, do: BoardState
@@ -46,6 +47,14 @@ defmodule GuideBoardLifecycle.BoardAggregate do
       :evoq_bit_flags.has_not(status, BoardStatus.initiated()) -> {:error, :not_initiated}
       :evoq_bit_flags.has(status, BoardStatus.archived()) -> {:error, :archived}
       true -> MaybeHostBoard.handle_from_map(payload)
+    end
+  end
+
+  defp do_execute(:rename_board, status, payload) do
+    cond do
+      :evoq_bit_flags.has_not(status, BoardStatus.initiated()) -> {:error, :not_initiated}
+      :evoq_bit_flags.has(status, BoardStatus.archived()) -> {:error, :archived}
+      true -> MaybeRenameBoard.handle_from_map(payload)
     end
   end
 

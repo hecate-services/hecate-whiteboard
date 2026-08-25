@@ -10,6 +10,7 @@ defmodule HecateWhiteboardWeb.BoardLive do
   alias GuideBoardLifecycle.BoardStatus
   alias GuideBoardLifecycle.DrawStroke.MaybeDrawStroke
   alias GuideBoardLifecycle.HostBoard.MaybeHostBoard
+  alias GuideBoardLifecycle.RenameBoard.MaybeRenameBoard
   alias QueryBoards.GetBoardSnapshotById.GetBoardSnapshotById
   alias QueryBoards.GetBoardSnapshotByIdOverMesh.GetBoardSnapshotByIdOverMesh
 
@@ -59,6 +60,7 @@ defmodule HecateWhiteboardWeb.BoardLive do
     |> assign(board_id: board_id, page_title: "hecate-whiteboard")
     |> assign(host_label: host_label())
     |> assign(stroke_count: length(shapes))
+    |> assign(editing_title?: false)
     |> assign_board_status(board)
     |> push_event("shapes:snapshot", %{shapes: shapes})
   end
@@ -74,6 +76,34 @@ defmodule HecateWhiteboardWeb.BoardLive do
 
     {:noreply, socket}
   end
+
+  # Title is only editable by the authority for this board -- same gate as
+  # drawing (can_draw?), not a separate rule. A joined/view-only board's
+  # title stays plain text, no click affordance at all.
+  def handle_event("edit_title", _params, %{assigns: %{can_draw?: true}} = socket),
+    do: {:noreply, assign(socket, editing_title?: true)}
+
+  def handle_event("edit_title", _params, socket), do: {:noreply, socket}
+
+  def handle_event("cancel_rename", _params, socket),
+    do: {:noreply, assign(socket, editing_title?: false)}
+
+  def handle_event("rename", %{"title" => title}, %{assigns: %{can_draw?: true}} = socket) do
+    title = String.trim(title)
+
+    socket =
+      if title == "" do
+        assign(socket, editing_title?: false)
+      else
+        MaybeRenameBoard.dispatch(%{board_id: socket.assigns.board_id, title: title})
+        assign(socket, board_title: title, editing_title?: false)
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("rename", _params, socket),
+    do: {:noreply, assign(socket, editing_title?: false)}
 
   @impl true
   def handle_info({:board_updated, board}, socket),

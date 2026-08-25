@@ -62,6 +62,68 @@ defmodule GuideBoardLifecycle.BoardAggregateTest do
              BoardAggregate.execute(state, %{command_type: :archive_board, board_id: "board-test"})
   end
 
+  test "rename_board succeeds on an initiated board and changes its title" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    assert {:ok, [renamed]} =
+             BoardAggregate.execute(state, %{
+               command_type: :rename_board,
+               board_id: "board-test",
+               title: "New title"
+             })
+
+    assert renamed.event_type == "board_renamed_v1"
+    state = BoardAggregate.apply(state, renamed)
+    assert state.title == "New title"
+  end
+
+  test "rename_board rejects a board that was never initiated" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    assert {:error, :not_initiated} =
+             BoardAggregate.execute(state, %{
+               command_type: :rename_board,
+               board_id: "board-test",
+               title: "New title"
+             })
+  end
+
+  test "rename_board rejects an archived board" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    {:ok, [archived]} =
+      BoardAggregate.execute(state, %{command_type: :archive_board, board_id: "board-test"})
+
+    state = BoardAggregate.apply(state, archived)
+
+    assert {:error, :archived} =
+             BoardAggregate.execute(state, %{
+               command_type: :rename_board,
+               board_id: "board-test",
+               title: "New title"
+             })
+  end
+
   test "unknown command is rejected" do
     {:ok, state} = BoardAggregate.init("board-test")
     assert {:error, :unknown_command} = BoardAggregate.execute(state, %{command_type: :nonsense})

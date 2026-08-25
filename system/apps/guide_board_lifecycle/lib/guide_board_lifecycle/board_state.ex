@@ -30,6 +30,10 @@ defmodule GuideBoardLifecycle.BoardState do
     %__MODULE__{state | status: :evoq_bit_flags.set(state.status, BoardStatus.archived())}
   end
 
+  defp do_apply("board_renamed_v1", state, event) do
+    %__MODULE__{state | title: field(:title, event)}
+  end
+
   # stroke_drawn_v1 and anything else: doesn't affect status/business-rule
   # state. Stroke content is a read-side concern -- see project_boards.
   defp do_apply(_other, state, _event), do: state

@@ -86,6 +86,45 @@ a.brand:hover {
   white-space: nowrap;
 }
 
+.board-title-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.board-title-editable {
+  cursor: text;
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+  margin: -0.1rem -0.35rem;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.board-title-editable:hover {
+  background: rgba(242, 239, 230, 0.08);
+  color: var(--chalk);
+}
+
+.board-title form {
+  display: inline-block;
+  max-width: 100%;
+}
+
+.board-title-input {
+  width: 100%;
+  max-width: 20rem;
+  background: var(--slate-deep);
+  border: 1px solid var(--amber);
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+  color: var(--chalk);
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+
 .status {
   display: flex;
   align-items: center;

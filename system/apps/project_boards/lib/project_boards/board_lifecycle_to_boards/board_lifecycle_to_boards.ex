@@ -1,7 +1,8 @@
 defmodule ProjectBoards.BoardLifecycleToBoards.BoardLifecycleToBoards do
-  # Projects board_initiated_v1/board_hosted_v1/board_archived_v1 onto the
-  # `boards` ETS table. Broadcasts each write to this board's PubSub topic
-  # so a live LiveView reflects host/archive transitions without polling.
+  # Projects board_initiated_v1/board_hosted_v1/board_archived_v1/
+  # board_renamed_v1 onto the `boards` ETS table. Broadcasts each write to
+  # this board's PubSub topic so a live LiveView reflects host/archive/
+  # rename transitions without polling.
   #
   # @behaviour :evoq_event_handler, NOT :evoq_projection -- the latter's
   # interested_in/init/project shape (init/1 -> {ok, State, ReadModel})
@@ -14,7 +15,8 @@ defmodule ProjectBoards.BoardLifecycleToBoards.BoardLifecycleToBoards do
   alias ProjectBoards.Store
 
   @impl true
-  def interested_in, do: ["board_initiated_v1", "board_hosted_v1", "board_archived_v1"]
+  def interested_in,
+    do: ["board_initiated_v1", "board_hosted_v1", "board_archived_v1", "board_renamed_v1"]
 
   @impl true
   def init(_config), do: {:ok, %{}}
@@ -62,6 +64,8 @@ defmodule ProjectBoards.BoardLifecycleToBoards.BoardLifecycleToBoards do
 
   defp apply_event("board_archived_v1", row, _data),
     do: %{row | status: :evoq_bit_flags.set(row.status, 2)}
+
+  defp apply_event("board_renamed_v1", row, data), do: %{row | title: field(:title, data)}
 
   defp field(key, map) when is_atom(key) do
     Map.get(map, key, Map.get(map, Atom.to_string(key)))
