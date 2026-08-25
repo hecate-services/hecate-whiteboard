@@ -156,12 +156,18 @@ const PASTE_OFFSET_PX = 24;
 
 // Distinct per-tool cursors -- a user reported switching tools gave no
 // visible feedback at all, and they were right: every non-select tool
-// fell back to the same bare "crosshair". Text/sticky share "text"
-// since both ultimately open a typeable textarea on click.
+// fell back to the same bare "crosshair". Sticky does NOT share "text"
+// with the plain Text tool despite both opening a typeable textarea on
+// click: sticky already has its own dedicated visual (the shape-ghost
+// preview following the pointer, see updateGhost/CSS .shape-ghost), so
+// an I-beam on top of that ghost was two conflicting placement cues at
+// once -- reported live as "when I click a sticky note tool I get a
+// text cursor". Text has no ghost preview, so its I-beam stays the only
+// cue and is the right one for it.
 const CURSOR_BY_TOOL = {
   pen: "crosshair",
   text: "text",
-  sticky: "text",
+  sticky: "crosshair",
   select: "default",
   rectangle: "crosshair",
   ellipse: "crosshair",

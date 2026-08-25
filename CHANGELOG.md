@@ -257,6 +257,18 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- The Sticky note tool showed the plain-text I-beam cursor
+  (`CURSOR_BY_TOOL.sticky`), same as the Text tool -- reported live
+  ("when i click a sticky note tool...i get a text cursor"). The two
+  shared "text" on the reasoning that both ultimately open a typeable
+  textarea on click, but sticky already has its own dedicated visual (a
+  colored ghost box following the pointer, see `updateGhost`/CSS
+  `.shape-ghost`) that the Text tool doesn't have -- the I-beam on top
+  of that ghost was two conflicting placement cues at once. Sticky now
+  uses `crosshair`, matching every other click/drag-to-place tool
+  (rectangle/ellipse/triangle/pen); Text keeps the I-beam as its only
+  cue, unchanged.
+
 - The `/boards` picker's "N here" presence badge undercounted: a viewer
   who opened a board but hadn't moved their mouse over the canvas yet
   was invisible to it, since `TrackPresence.Roster` only ever gained a
