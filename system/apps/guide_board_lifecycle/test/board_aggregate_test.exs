@@ -290,4 +290,255 @@ defmodule GuideBoardLifecycle.BoardAggregateTest do
 
     assert departed.event_type == "peer_departed_v1"
   end
+
+  # Load-bearing for AnswerShapeMutationRequests the same way draw_stroke's
+  # own :not_hosted rejection is load-bearing for AnswerDrawStrokeRequests.
+  test "place_sticky rejects a board that isn't hosted here" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    assert {:error, :not_hosted} =
+             BoardAggregate.execute(state, %{
+               command_type: :place_sticky,
+               board_id: "board-test",
+               shape_id: "s1",
+               x: 1,
+               y: 1,
+               color: "#f2994a",
+               text: "hello"
+             })
+  end
+
+  test "place_sticky succeeds once a board is hosted" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    {:ok, [hosted]} =
+      BoardAggregate.execute(state, %{command_type: :host_board, board_id: "board-test"})
+
+    state = BoardAggregate.apply(state, hosted)
+
+    assert {:ok, [placed]} =
+             BoardAggregate.execute(state, %{
+               command_type: :place_sticky,
+               board_id: "board-test",
+               shape_id: "s1",
+               x: 1,
+               y: 1,
+               color: "#f2994a",
+               text: "hello"
+             })
+
+    assert placed.event_type == "sticky_placed_v1"
+  end
+
+  test "place_text rejects a board that isn't hosted here" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    assert {:error, :not_hosted} =
+             BoardAggregate.execute(state, %{
+               command_type: :place_text,
+               board_id: "board-test",
+               shape_id: "s1",
+               x: 1,
+               y: 1,
+               color: "#f2efe6",
+               text: "hello"
+             })
+  end
+
+  test "place_text succeeds once a board is hosted" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    {:ok, [hosted]} =
+      BoardAggregate.execute(state, %{command_type: :host_board, board_id: "board-test"})
+
+    state = BoardAggregate.apply(state, hosted)
+
+    assert {:ok, [placed]} =
+             BoardAggregate.execute(state, %{
+               command_type: :place_text,
+               board_id: "board-test",
+               shape_id: "s1",
+               x: 1,
+               y: 1,
+               color: "#f2efe6",
+               text: "hello"
+             })
+
+    assert placed.event_type == "text_placed_v1"
+  end
+
+  test "move_shape rejects a board that isn't hosted here" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    assert {:error, :not_hosted} =
+             BoardAggregate.execute(state, %{
+               command_type: :move_shape,
+               board_id: "board-test",
+               shape_id: "s1",
+               points: [%{x: 5, y: 5}]
+             })
+  end
+
+  test "move_shape succeeds once a board is hosted" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    {:ok, [hosted]} =
+      BoardAggregate.execute(state, %{command_type: :host_board, board_id: "board-test"})
+
+    state = BoardAggregate.apply(state, hosted)
+
+    assert {:ok, [moved]} =
+             BoardAggregate.execute(state, %{
+               command_type: :move_shape,
+               board_id: "board-test",
+               shape_id: "s1",
+               points: [%{x: 5, y: 5}]
+             })
+
+    assert moved.event_type == "shape_moved_v1"
+  end
+
+  test "remove_shape rejects a board that isn't hosted here" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    assert {:error, :not_hosted} =
+             BoardAggregate.execute(state, %{
+               command_type: :remove_shape,
+               board_id: "board-test",
+               shape_id: "s1"
+             })
+  end
+
+  test "remove_shape succeeds once a board is hosted" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    {:ok, [hosted]} =
+      BoardAggregate.execute(state, %{command_type: :host_board, board_id: "board-test"})
+
+    state = BoardAggregate.apply(state, hosted)
+
+    assert {:ok, [removed]} =
+             BoardAggregate.execute(state, %{
+               command_type: :remove_shape,
+               board_id: "board-test",
+               shape_id: "s1"
+             })
+
+    assert removed.event_type == "shape_removed_v1"
+  end
+
+  test "place_sticky rejects an archived board" do
+    {:ok, state} = BoardAggregate.init("board-test")
+
+    {:ok, [initiated]} =
+      BoardAggregate.execute(state, %{
+        command_type: :initiate_board,
+        board_id: "board-test",
+        owner: "raf",
+        title: "t"
+      })
+
+    state = BoardAggregate.apply(state, initiated)
+
+    {:ok, [hosted]} =
+      BoardAggregate.execute(state, %{command_type: :host_board, board_id: "board-test"})
+
+    state = BoardAggregate.apply(state, hosted)
+
+    {:ok, [archived]} =
+      BoardAggregate.execute(state, %{command_type: :archive_board, board_id: "board-test"})
+
+    state = BoardAggregate.apply(state, archived)
+
+    assert {:error, :archived} =
+             BoardAggregate.execute(state, %{
+               command_type: :place_sticky,
+               board_id: "board-test",
+               shape_id: "s1",
+               x: 1,
+               y: 1,
+               color: "#f2994a",
+               text: "hello"
+             })
+  end
 end

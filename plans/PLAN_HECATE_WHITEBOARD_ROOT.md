@@ -912,6 +912,109 @@ snapshot race with the browser automation tool's own screenshot timing,
 not a real gap; redrawing and re-checking a few seconds later showed it
 had landed correctly on both sides all along.
 
+### Toolbox side pane: text, selection, sticky notes — DONE 2026-08-25
+
+Also archived every accumulated test board (`archive_board`, already
+built) across all three nodes first, per the user's own request to
+clear them before building this -- the default board has a genuinely
+separate local history per node (each one self-hosts it independently,
+see the "multi-hosted symmetric gossip" note elsewhere in this doc), so
+archiving it needed one dispatch per node, not one dispatch that
+somehow propagates.
+
+Two real design forks here were the user's call, not mine, asked via
+AskUserQuestion before writing code: archive vs. hard-wipe for the test
+boards (archive won, reversible, keeps this app's own
+event-store-immutable principle intact), and how far selection should
+reach in this pass (select+move+delete won, not select-only or
+select+delete -- the fuller scope, roughly double the backend of the
+minimal option).
+
+**New shapes: sticky notes and text labels**, alongside the existing
+freehand stroke. Four new CMD desks in `guide_board_lifecycle`
+(`place_sticky`, `place_text`, `move_shape`, `remove_shape`), each
+mirroring `draw_stroke`'s write-relay shape (dispatch locally if
+hosted, relay over mesh otherwise) -- except the relay/mesh-replication
+PLUMBING is shared across all four (`AnswerShapeMutationRequests` one
+topic, `ShapeMutatedV1ToMesh`/`ShapeMeshSubscriber` one topic each),
+not duplicated four times like `draw_stroke`'s own topic-per-command
+precedent -- these four are genuine siblings of one "shape mutation"
+concern, unlike `draw_stroke` vs `rename_board`, which aren't.
+`move_shape` works identically across every shape kind because every
+`board_shapes` row now carries `points` uniformly (a stroke's many
+points, or a sticky/text's single anchor wrapped in a one-element
+list) plus a shared `shape_id` (a stroke's own `shape_id` equals its
+`stroke_id`) -- see `ProjectBoards.Store.move_shape/3`'s own header.
+`remove_shape` has no archived guard exception the way `leave_board`
+does; placing/moving/removing content is a mutation like drawing ink,
+so it uses the exact same hosted/not-archived guard `draw_stroke` does.
+
+**Rendering is a deliberate hybrid**: strokes stay on `<canvas>`
+(unchanged, already proven), stickies and text render as plain DOM
+elements in a new `#board-canvas-shapes` layer -- a native DOM element
+gives free click targets, drag, and text layout for something with
+exactly one anchor point, which canvas hit-testing would have made
+harder for no benefit. Selection has to bridge both substrates: a
+sticky/text click is a normal DOM `pointerdown` on its own element; a
+stroke click is a distance-to-nearest-segment hit test against
+`this.shapes`' stored points, inside a cheap bounding-box pre-filter.
+Both converge on the same `move_shape`/`remove_shape` commands either
+way.
+
+**Sticky note colors are the classic Event Storming legend**: orange
+(Domain Event), blue (Command), yellow (Actor), purple (Policy), green
+(Read Model), pink (Hotspot) -- six swatches, each also a tool
+selector (clicking one both picks the color and switches to the sticky
+tool, same one-click-does-both convention the existing ink swatches
+already used for the pen tool).
+
+**Sticky/text placement uses a real local-then-confirmed pattern**,
+matching strokes: clicking places a local, uncommitted `<textarea>`
+sized/colored like the eventual shape; typing and blurring (or Enter)
+dispatches the real command only if non-empty, and the confirmed shape
+renders moments later via the normal broadcast path, same as a
+just-drawn stroke's own round trip.
+
+**A real, load-bearing bug found and fixed during live verification**:
+placing a sticky or text label silently did nothing, every time, with
+no visible trace and no console error. Root cause: calling
+`textarea.focus()` synchronously inside a `pointerdown` handler doesn't
+reliably "stick" -- the pointerdown event's own default focus handling
+runs AFTER the handler returns, and since the canvas itself isn't
+focusable, that default action re-focuses `<body>`, firing the
+textarea's `blur` handler before a single character could be typed;
+`commit()` then saw an empty value and silently discarded the element.
+Fixed with `e.preventDefault()` on the pointerdown for the text/sticky
+branch specifically (not needed for the pen or select branches, which
+have no synchronous-focus step to protect). Found by direct DOM/JS
+diagnosis after browser-automation clicks kept producing no visible
+effect -- narrowed it down by dispatching raw `PointerEvent`s via
+`javascript_tool` (bypassing whatever the click-simulation layer itself
+does differently for a plain click vs. a real drag, which turned out to
+be a red herring, not the actual cause) and confirming the element WAS
+being created and removed within the same synchronous call stack.
+
+**Live-verified locally** (`mix phx.server`, direct `PointerEvent`
+dispatch to sidestep the browser-automation tool's own click-dispatch
+unreliability in this session, confirmed the app's real listeners
+behave identically to genuine input either way): placed a sticky note
+and a text label, confirmed both rendered correctly; selected each via
+the select tool, dragged both to new positions, confirmed the move
+round-tripped through the server (checked 400ms after release, past
+the full push/broadcast/push_event cycle, not just the local optimistic
+frame); deleted both via the Delete key; separately selected, moved,
+and deleted a hand-drawn STROKE through the same select tool, proving
+the canvas-hit-test path (not just the DOM path) works too. Then a full
+local `docker build` to confirm the image actually builds (the
+previous feature's own lesson, applied immediately rather than trusting
+CI to catch it first).
+
+**Known simplification, not fixed this pass**: the topbar's stroke
+count only ever increments (on `stroke_drawn_v1`), never decrements on
+`shape_removed_v1` -- cosmetic only, the read model itself is correct,
+just the displayed count can overstate what is currently on the board
+after a delete.
+
 ---
 
 ## Nothing is committed anywhere

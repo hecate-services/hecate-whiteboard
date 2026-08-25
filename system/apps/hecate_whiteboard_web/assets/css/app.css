@@ -185,6 +185,35 @@ a.brand:hover {
   }
 }
 
+/* ---- body layout (side pane + canvas) ---- */
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.side-pane {
+  width: 176px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1rem 0.9rem;
+  background: var(--slate-deep);
+  border-right: 1px solid var(--slate-line);
+  overflow-y: auto;
+}
+
+.side-section-heading {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--chalk-dim);
+  font-weight: 600;
+  margin-bottom: 0.6rem;
+}
+
 /* ---- canvas ---- */
 
 .canvas-wrap {
@@ -269,22 +298,16 @@ a.brand:hover {
   font-style: italic;
 }
 
-/* ---- toolbar ---- */
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 1.25rem;
-  height: 56px;
-  flex-shrink: 0;
-  background: var(--slate-deep);
-  border-top: 1px solid var(--slate-line);
-}
+/* ---- tools (side pane) ---- */
 
 .tool-group {
   display: flex;
   gap: 0.4rem;
+}
+
+.tool-group-vertical {
+  flex-direction: column;
+  margin-bottom: 0.9rem;
 }
 
 .tool {
@@ -318,9 +341,10 @@ a.brand:hover {
 
 .swatches {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.55rem;
-  padding-left: 1.25rem;
-  border-left: 1px solid var(--slate-line);
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--slate-line);
 }
 
 .swatch {
@@ -341,6 +365,98 @@ a.brand:hover {
 
 .swatch-active {
   box-shadow: 0 0 0 2px var(--slate-deep), 0 0 0 3px var(--amber);
+}
+
+/* ---- sticky notes (side pane) ---- */
+
+.sticky-swatches {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+
+.sticky-swatch {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 4px;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  background: var(--sw);
+  box-shadow: 0 0 0 2px var(--slate-deep), 0 0 0 3px transparent;
+  transition: box-shadow 0.15s ease;
+}
+
+.sticky-swatch:hover {
+  box-shadow: 0 0 0 2px var(--slate-deep), 0 0 0 3px var(--chalk-dim);
+}
+
+.sticky-swatch-active {
+  box-shadow: 0 0 0 2px var(--slate-deep), 0 0 0 3px var(--amber);
+}
+
+/* ---- placed shapes: stickies + text labels (DOM, not canvas) ---- */
+
+.shapes-layer {
+  overflow: hidden;
+}
+
+.shape-sticky,
+.shape-text {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(var(--sx), var(--sy));
+  /* Click-through by default so the pen/text/sticky tools can act on the
+     canvas underneath even where a shape already sits -- only the select
+     tool needs these to actually catch clicks. See board_canvas_hook.js's
+     setTool for the toggle. A pending (not-yet-confirmed) shape being
+     typed into is the one exception, forced back on below. */
+  pointer-events: none;
+}
+
+.shapes-layer.interactive .shape-sticky,
+.shapes-layer.interactive .shape-text {
+  pointer-events: auto;
+}
+
+.shape-pending {
+  pointer-events: auto;
+}
+
+.shape-sticky {
+  width: 140px;
+  min-height: 100px;
+  padding: 0.6rem 0.65rem;
+  border-radius: 3px;
+  background: var(--shape-color);
+  color: var(--slate-deep);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  box-shadow: 2px 3px 6px rgba(0, 0, 0, 0.35);
+  cursor: default;
+}
+
+.shape-text {
+  color: var(--shape-color);
+  font-size: 1rem;
+  white-space: pre-wrap;
+  cursor: default;
+  min-width: 1.5rem;
+  min-height: 1.4rem;
+}
+
+.shape-selected {
+  outline: 2px dashed var(--amber);
+  outline-offset: 3px;
+}
+
+.shape-editing {
+  outline: 2px solid var(--amber);
+  outline-offset: 3px;
+  cursor: text;
 }
 
 /* ---- boards picker ---- */

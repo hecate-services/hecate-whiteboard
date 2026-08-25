@@ -21,6 +21,10 @@ defmodule HecateWhiteboardWeb.BoardLive do
   alias GuideBoardLifecycle.DrawStroke.MaybeDrawStroke
   alias GuideBoardLifecycle.HostBoard.MaybeHostBoard
   alias GuideBoardLifecycle.LeaveBoard.MaybeLeaveBoard
+  alias GuideBoardLifecycle.MoveShape.MaybeMoveShape
+  alias GuideBoardLifecycle.PlaceSticky.MaybePlaceSticky
+  alias GuideBoardLifecycle.PlaceText.MaybePlaceText
+  alias GuideBoardLifecycle.RemoveShape.MaybeRemoveShape
   alias GuideBoardLifecycle.RenameBoard.MaybeRenameBoard
   alias QueryBoards.GetBoardSnapshotById.GetBoardSnapshotById
   alias QueryBoards.GetBoardSnapshotByIdOverMesh.GetBoardSnapshotByIdOverMesh
@@ -117,6 +121,54 @@ defmodule HecateWhiteboardWeb.BoardLive do
     {:noreply, socket}
   end
 
+  # Sticky/text/move/remove all follow the exact same hosted?/relay split
+  # as "stroke" above -- see MaybePlaceSticky.relay/1's own doc for why
+  # these four share ONE relay-request topic instead of draw_stroke's
+  # per-command one.
+  def handle_event(
+        "place_sticky",
+        %{"x" => x, "y" => y, "color" => color, "text" => text},
+        socket
+      ) do
+    params = %{board_id: socket.assigns.board_id, x: x, y: y, color: color, text: text}
+
+    if socket.assigns.hosted?,
+      do: MaybePlaceSticky.dispatch(params),
+      else: MaybePlaceSticky.relay(params)
+
+    {:noreply, socket}
+  end
+
+  def handle_event("place_text", %{"x" => x, "y" => y, "color" => color, "text" => text}, socket) do
+    params = %{board_id: socket.assigns.board_id, x: x, y: y, color: color, text: text}
+
+    if socket.assigns.hosted?,
+      do: MaybePlaceText.dispatch(params),
+      else: MaybePlaceText.relay(params)
+
+    {:noreply, socket}
+  end
+
+  def handle_event("move_shape", %{"shape_id" => shape_id, "points" => points}, socket) do
+    params = %{board_id: socket.assigns.board_id, shape_id: shape_id, points: points}
+
+    if socket.assigns.hosted?,
+      do: MaybeMoveShape.dispatch(params),
+      else: MaybeMoveShape.relay(params)
+
+    {:noreply, socket}
+  end
+
+  def handle_event("remove_shape", %{"shape_id" => shape_id}, socket) do
+    params = %{board_id: socket.assigns.board_id, shape_id: shape_id}
+
+    if socket.assigns.hosted?,
+      do: MaybeRemoveShape.dispatch(params),
+      else: MaybeRemoveShape.relay(params)
+
+    {:noreply, socket}
+  end
+
   # Title is only editable by the authority for this board (can_rename?,
   # NOT the broader can_draw? -- see this module's own header). A
   # joined board's title stays plain text, no click affordance at all.
@@ -175,6 +227,15 @@ defmodule HecateWhiteboardWeb.BoardLive do
 
     {:noreply, socket}
   end
+
+  def handle_info({:shape_placed, shape}, socket),
+    do: {:noreply, push_event(socket, "shape_placed", shape)}
+
+  def handle_info({:shape_moved, payload}, socket),
+    do: {:noreply, push_event(socket, "shape_moved", payload)}
+
+  def handle_info({:shape_removed, shape_id}, socket),
+    do: {:noreply, push_event(socket, "shape_removed", %{shape_id: shape_id})}
 
   # Never echo a peer's own settled/left cursor back to itself -- this
   # process is both the origin and, via the same board:<id> PubSub topic

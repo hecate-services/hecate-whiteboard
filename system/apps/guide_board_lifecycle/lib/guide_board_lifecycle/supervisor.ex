@@ -14,6 +14,8 @@ defmodule GuideBoardLifecycle.Supervisor do
   alias GuideBoardLifecycle.DrawStroke.AnswerDrawStrokeRequestsStarter
   alias GuideBoardLifecycle.LeaveBoard.AnswerLeaveBoardRequestsStarter
   alias GuideBoardLifecycle.LeaveBoard.PeerDepartedV1ToMesh
+  alias GuideBoardLifecycle.ShapeMutation.AnswerShapeMutationRequestsStarter
+  alias GuideBoardLifecycle.ShapeMutation.ShapeMutatedV1ToMesh
   alias GuideBoardLifecycle.StrokeDrawnV1ToMesh.StrokeDrawnV1ToMesh
 
   def start_link, do: Supervisor.start_link(__MODULE__, [], name: __MODULE__)
@@ -23,10 +25,12 @@ defmodule GuideBoardLifecycle.Supervisor do
     children = [
       handler(StrokeDrawnV1ToMesh),
       handler(PeerDepartedV1ToMesh),
+      handler(ShapeMutatedV1ToMesh),
       {DynamicSupervisor,
        name: GuideBoardLifecycle.MeshSubscriberSupervisor, strategy: :one_for_one},
       AnswerDrawStrokeRequestsStarter,
-      AnswerLeaveBoardRequestsStarter
+      AnswerLeaveBoardRequestsStarter,
+      AnswerShapeMutationRequestsStarter
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

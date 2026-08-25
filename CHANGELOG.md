@@ -7,6 +7,17 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- Toolbox side pane: pen (existing), text, and selection tools, plus
+  sticky notes in the classic Event Storming palette (orange Domain
+  Event, blue Command, yellow Actor, purple Policy, green Read Model,
+  pink Hotspot). New shapes (`sticky_placed_v1`, `text_placed_v1`) and
+  new shape-agnostic mutations (`shape_moved_v1`, `shape_removed_v1`)
+  work uniformly across strokes, stickies, and text via a shared
+  `points`/`shape_id` shape on every `board_shapes` row. Sticky/text
+  render as DOM elements (native click/drag/text layout); strokes stay
+  canvas-drawn with a distance-to-segment hit test for selection.
+  Archived all accumulated test boards first, per request.
+
 - Walking skeleton: `hecate_whiteboard` (hecate_om_service, first Elixir
   implementation of that behaviour in this workspace) + `guide_board_lifecycle`
   CMD app (`initiate_board`, `archive_board`). Boots, joins the mesh,
@@ -94,6 +105,13 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- Placing a sticky note or text label silently did nothing, every
+  time, with no visible trace: `textarea.focus()` called synchronously
+  inside a `pointerdown` handler didn't stick, because the pointerdown
+  event's own default focus handling ran afterward and re-focused
+  `<body>` (the canvas isn't focusable), firing the textarea's blur
+  before any text could be typed and discarding it as empty. Fixed
+  with `e.preventDefault()` on that specific branch.
 - The presence/cursors push above broke the container build:
   `Dockerfile`'s staged per-app `COPY apps/<app>/mix.exs` lines were
   never updated for the new `track_presence` app, so `mix deps.compile`

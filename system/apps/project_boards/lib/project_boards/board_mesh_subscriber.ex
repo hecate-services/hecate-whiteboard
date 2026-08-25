@@ -35,6 +35,8 @@ defmodule ProjectBoards.BoardMeshSubscriber do
     # peer's entire history on this one.
     if ProjectBoards.Store.new_stroke?(stroke_id) do
       stroke = %{
+        kind: "stroke",
+        shape_id: stroke_id,
         stroke_id: stroke_id,
         points: field(:points, fact),
         color: field(:color, fact),

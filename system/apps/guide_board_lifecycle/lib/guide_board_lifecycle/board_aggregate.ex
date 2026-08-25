@@ -11,6 +11,10 @@ defmodule GuideBoardLifecycle.BoardAggregate do
   alias GuideBoardLifecycle.HostBoard.MaybeHostBoard
   alias GuideBoardLifecycle.InitiateBoard.MaybeInitiateBoard
   alias GuideBoardLifecycle.LeaveBoard.MaybeLeaveBoard
+  alias GuideBoardLifecycle.MoveShape.MaybeMoveShape
+  alias GuideBoardLifecycle.PlaceSticky.MaybePlaceSticky
+  alias GuideBoardLifecycle.PlaceText.MaybePlaceText
+  alias GuideBoardLifecycle.RemoveShape.MaybeRemoveShape
   alias GuideBoardLifecycle.RenameBoard.MaybeRenameBoard
 
   @impl true
@@ -75,6 +79,41 @@ defmodule GuideBoardLifecycle.BoardAggregate do
       {:error, :not_hosted}
     else
       MaybeLeaveBoard.handle_from_map(payload)
+    end
+  end
+
+  # Same guard shape as draw_stroke -- placing/moving/removing a shape is
+  # a content mutation, just like drawing ink, so it needs the same
+  # hosted/not-archived rule (unlike leave_board above).
+  defp do_execute(:place_sticky, status, payload) do
+    cond do
+      :evoq_bit_flags.has_not(status, BoardStatus.hosted()) -> {:error, :not_hosted}
+      :evoq_bit_flags.has(status, BoardStatus.archived()) -> {:error, :archived}
+      true -> MaybePlaceSticky.handle_from_map(payload)
+    end
+  end
+
+  defp do_execute(:place_text, status, payload) do
+    cond do
+      :evoq_bit_flags.has_not(status, BoardStatus.hosted()) -> {:error, :not_hosted}
+      :evoq_bit_flags.has(status, BoardStatus.archived()) -> {:error, :archived}
+      true -> MaybePlaceText.handle_from_map(payload)
+    end
+  end
+
+  defp do_execute(:move_shape, status, payload) do
+    cond do
+      :evoq_bit_flags.has_not(status, BoardStatus.hosted()) -> {:error, :not_hosted}
+      :evoq_bit_flags.has(status, BoardStatus.archived()) -> {:error, :archived}
+      true -> MaybeMoveShape.handle_from_map(payload)
+    end
+  end
+
+  defp do_execute(:remove_shape, status, payload) do
+    cond do
+      :evoq_bit_flags.has_not(status, BoardStatus.hosted()) -> {:error, :not_hosted}
+      :evoq_bit_flags.has(status, BoardStatus.archived()) -> {:error, :archived}
+      true -> MaybeRemoveShape.handle_from_map(payload)
     end
   end
 

@@ -25,6 +25,8 @@ defmodule ProjectBoards.StrokeDrawnV1ToBoardShapes.StrokeDrawnV1ToBoardShapes do
     # host's own full local history -- see Store's module doc for why.
     if Store.new_stroke?(stroke_id) do
       stroke = %{
+        kind: "stroke",
+        shape_id: stroke_id,
         stroke_id: stroke_id,
         points: field(:points, data),
         color: field(:color, data),

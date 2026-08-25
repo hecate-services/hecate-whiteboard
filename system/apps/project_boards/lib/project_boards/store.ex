@@ -69,4 +69,35 @@ defmodule ProjectBoards.Store do
       [] -> 0
     end
   end
+
+  # Uniform shape lookup/move/remove -- works across every shape kind
+  # (stroke, sticky, text) because every board_shapes row carries a
+  # shape_id regardless of origin (a stroke row's shape_id equals its own
+  # stroke_id, set by StrokeDrawnV1ToBoardShapes/BoardMeshSubscriber; a
+  # sticky/text row's shape_id is native). See MoveShapeV1's own header
+  # for why move works by replacing `points` wholesale rather than a
+  # tracked delta.
+  def find_shape(board_id, shape_id) do
+    @board_shapes
+    |> :ets.lookup(board_id)
+    |> Enum.find_value(fn {_bid, row} -> if row.shape_id == shape_id, do: row end)
+  end
+
+  def remove_shape(board_id, shape_id) do
+    case find_shape(board_id, shape_id) do
+      nil -> :ok
+      row -> :ets.delete_object(@board_shapes, {board_id, row})
+    end
+  end
+
+  def move_shape(board_id, shape_id, new_points) do
+    case find_shape(board_id, shape_id) do
+      nil ->
+        :ok
+
+      row ->
+        :ets.delete_object(@board_shapes, {board_id, row})
+        :ets.insert(@board_shapes, {board_id, %{row | points: new_points}})
+    end
+  end
 end
