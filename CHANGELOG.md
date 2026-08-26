@@ -257,6 +257,31 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- `QueryBoards.ListBoardsOverMesh`'s remote-board discovery, called once
+  at `/boards` mount, failed fast and PERMANENTLY on `mesh_unavailable`
+  -- unlike every other mesh integration point in this app (the various
+  `*Starter` GenServers), it never retried. A picker page that happened
+  to connect during the few-second window right after a node restart
+  (mesh not rejoined yet) got stuck showing "No boards found on other
+  nodes" for its entire lifetime, since nothing ever asked again. Found
+  live right after the fleet-wide wipe above restarted every node.
+  `BoardsLive` now retries every 5s (matching the `*Starter`s' own
+  interval) on a `mesh_unavailable` failure specifically, via
+  `Process.send_after/3` + re-triggering the same `start_async`; other
+  failure kinds still fail once, unretried, since retrying an unrelated
+  error forever would risk masking a real bug. The retry keeps
+  `remote_boards_loading?` true throughout, so the page reads "Checking
+  the mesh…" the whole time rather than flashing an empty state that
+  then silently refills. `ListBoardsOverMesh.call/1` itself is
+  unchanged (still fails fast) -- every other query module in this app
+  makes the same choice and leaves retry policy to the caller, so this
+  keeps that convention intact rather than quietly changing what
+  `call/1` means for every caller. Verified locally: local dev never
+  has a mesh pool, so it's a standing reproduction of the exact race --
+  confirmed the retry firing every 5s in the server log and the page
+  reading "Checking the mesh…" indefinitely instead of the old
+  permanent empty state.
+
 - Escape still did nothing for one more case beyond the earlier fix: the
   sticky tool's own live placement preview (a colored ghost box that
   follows the pointer while the tool is armed, before anything is

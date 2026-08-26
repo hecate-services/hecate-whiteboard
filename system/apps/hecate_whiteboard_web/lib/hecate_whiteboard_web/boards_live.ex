@@ -15,6 +15,13 @@ defmodule HecateWhiteboardWeb.BoardsLive do
   alias QueryBoards.ListHostedBoards.ListHostedBoards
   alias TrackPresence.Roster
 
+  require Logger
+
+  # How long to wait before retrying remote-board discovery after a
+  # mesh_unavailable failure -- same interval the various *Starter
+  # GenServers use for their own mesh_handles() retry loop.
+  @mesh_retry_ms 5_000
+
   # Presence is mesh-wide already -- every node absorbs every peer's
   # cursor_settled_v1 fact regardless of which node hosts that peer's
   # board (see TrackPresence.Roster's own doc), so subscribing to a
@@ -90,11 +97,42 @@ defmodule HecateWhiteboardWeb.BoardsLive do
     {:noreply, socket}
   end
 
+  # Unlike every other mesh integration point in this app (the various
+  # *Starter GenServers), ListBoardsOverMesh.call/1 used to fail fast and
+  # PERMANENTLY on mesh_unavailable -- a one-shot query with no retry of
+  # its own, called exactly once at mount. A LiveView process that
+  # happened to connect during the few-second window right after a node
+  # restart (mesh not rejoined yet) got stuck showing "no boards found on
+  # other nodes" for its entire lifetime, since nothing ever asked again.
+  # Found live, right after a fleet-wide restart. Retried here rather
+  # than inside ListBoardsOverMesh itself, since every other query module
+  # in this app (GetBoardSnapshotByIdOverMesh included) fails fast on
+  # purpose and leaves retry policy to the caller -- this keeps that
+  # convention intact instead of quietly changing what `call/1` means for
+  # every caller. `remote_boards_loading?` is deliberately left alone
+  # here (still `true` from mount) rather than flipped to `false`: this
+  # is a "still working on it," not a real failure the empty state should
+  # announce.
+  def handle_async(
+        :discover_remote_boards,
+        {:ok, {:error, {:mesh_unavailable, _} = reason}},
+        socket
+      ) do
+    Logger.warning("[BoardsLive] discover_remote_boards: #{inspect(reason)}, retrying")
+    Process.send_after(self(), :retry_discover_remote_boards, @mesh_retry_ms)
+    {:noreply, socket}
+  end
+
   def handle_async(:discover_remote_boards, {:ok, {:error, _reason}}, socket),
     do: {:noreply, assign(socket, remote_boards_loading?: false)}
 
   def handle_async(:discover_remote_boards, {:exit, _reason}, socket),
     do: {:noreply, assign(socket, remote_boards_loading?: false)}
+
+  def handle_info(:retry_discover_remote_boards, socket),
+    do:
+      {:noreply,
+       start_async(socket, :discover_remote_boards, fn -> ListBoardsOverMesh.call() end)}
 
   # Live half of the same picture: GuideBoardLifecycle.BoardLifecycleV1ToMesh
   # publishes each of the four board-lifecycle events on its own topic
