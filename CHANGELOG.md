@@ -257,6 +257,18 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- Every pre-existing board (including "Demo Video Board", reported live
+  as "empty") came up with no shapes after the `shape_initiated_v1`/
+  `shape_amended_v1` consolidation deployed above -- exactly its own
+  flagged consequence: those shapes were drawn under the old event
+  types, and the new projection's `interested_in/0` doesn't list them.
+  Offered a one-off backfill; the user chose a full fleet-wide wipe
+  instead, since this is throwaway dev/demo infra with nothing worth
+  preserving. `scripts/wipe_fleet_board_data.sh` stops each node,
+  deletes only `board_store/` (never `identity/` -- no mesh
+  re-enrollment needed afterward), restarts. Run against beam01, beam02,
+  and msi00; verified clean.
+
 - The Sticky note tool showed the plain-text I-beam cursor
   (`CURSOR_BY_TOOL.sticky`), same as the Text tool -- reported live
   ("when i click a sticky note tool...i get a text cursor"). The two

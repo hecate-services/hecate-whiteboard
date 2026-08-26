@@ -1438,6 +1438,30 @@ scheme. Deleted the rectangle (`shape_removed_v1`) — gone, and stayed gone
 after reload. Server log confirmed `ShapeLifecycleV1ToMesh` fired for both
 the `draw_geometry` and `place_sticky` dispatches.
 
+### Three live bug reports, same day — DONE 2026-08-25/26
+
+Full detail in CHANGELOG.md's `[Unreleased]` section (this doc is over
+its own ~75KB soft-split guideline already; not duplicating the prose
+here). One-line summary of each, all shipped/deployed/verified:
+
+- `/boards` "N here" undercounted an idle viewer (`Roster.touch/1` only
+  ever fired from a real `cursor:settle`, never from mount) — fixed by
+  registering presence at connect time with `x`/`y` left nil.
+- Sticky tool showed the Text tool's I-beam cursor, conflicting with
+  sticky's own ghost-preview visual — now `crosshair`, matching every
+  other click-to-place tool.
+- "Demo Video Board" (and every other pre-existing board) came up empty
+  after the `shape_initiated_v1` consolidation deploy above, exactly the
+  flagged consequence. Asked the user backfill-vs-wipe; **user chose a
+  full fleet-wide wipe** over a one-off backfill. `scripts/
+  wipe_fleet_board_data.sh` stops each node, deletes ONLY `board_store/`
+  (never `identity/`, so no mesh re-enrollment needed) — via a throwaway
+  `alpine` container on beam01/beam02 to delete root-owned bind-mount
+  files without host sudo, plain `rm` on msi00 (podman rootless, already
+  user-owned) — then restarts. Run against all three nodes; verified
+  clean (old board_ids gone, cross-node discovery/replication still
+  correct against a freshly-created board).
+
 ---
 
 ## Nothing is committed anywhere
