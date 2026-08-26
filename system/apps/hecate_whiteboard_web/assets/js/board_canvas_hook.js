@@ -800,11 +800,25 @@ export const BoardCanvas = {
   // entry -- there's no batch-placement command, and there doesn't need
   // to be one: each arrives, renders, and offsets identically whether
   // it came from a single-shape or whole-group copy.
+  //
+  // Reassigns this.clipboard to pasteOne's own offset points afterward,
+  // so a SECOND paste of the same clipboard offsets again from where the
+  // FIRST one landed, not from the original -- without this, repeated
+  // Ctrl+V (the actual workflow for placing several stickies: copy one,
+  // paste it N times) stacked every paste at the exact same spot, since
+  // pasteOne always read the clipboard's original, never-updated points.
+  // Asked live ("shouldn't paste respect a little offset?") after
+  // exactly that stacking was visible. copySelection/cutSelection both
+  // rebuild the clipboard from scratch, so copying something new
+  // correctly resets the cascade back to the original position.
   pasteClipboard() {
     if (!this.clipboard) return;
-    this.clipboard.forEach((item) => this.pasteOne(item));
+    this.clipboard = this.clipboard.map((item) => this.pasteOne(item));
   },
 
+  // Returns item with its points replaced by the offset copy just
+  // dispatched -- pasteClipboard uses this to make the NEXT paste of the
+  // same clipboard cascade from here instead of restacking on top of it.
   pasteOne(item) {
     const points = item.points.map((p) => ({
       x: p.x + PASTE_OFFSET_PX,
@@ -829,6 +843,8 @@ export const BoardCanvas = {
           this.pushEvent("draw_geometry", { kind: item.kind, points, color: item.color });
         }
     }
+
+    return { ...item, points };
   },
 
   // Every caller of point(e) wants a WORLD coordinate -- what gets

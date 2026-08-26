@@ -282,6 +282,21 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- Repeated Ctrl/Cmd+V stacked every paste on top of the SAME spot
+  instead of cascading -- `pasteOne` always read the clipboard's
+  original, never-updated points, so every paste offset by the same
+  fixed 24px from what was COPIED, not from the LAST paste. Asked live
+  ("shouldn't paste respect a little offset?") after exactly this
+  stacking was visible, from the app's actual bulk-placement workflow
+  (select one sticky, copy it, paste N times). Fixed by having
+  `pasteClipboard` reassign `this.clipboard` to each `pasteOne`'s own
+  offset points afterward, so the NEXT paste of the same clipboard
+  cascades from there. `copySelection`/cutting still rebuild the
+  clipboard from scratch, so copying something new correctly resets the
+  cascade back to the original position -- verified live: 3 consecutive
+  pastes landed at +24/+48/+72px in a staircase, then a fresh copy+paste
+  of the original landed back at +24px, not +96px.
+
 - `QueryBoards.ListBoardsOverMesh`'s remote-board discovery, called once
   at `/boards` mount, failed fast and PERMANENTLY on `mesh_unavailable`
   -- unlike every other mesh integration point in this app (the various
