@@ -502,6 +502,28 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- Default board (`/` with no board_id) collided across fleet nodes.
+  `@default_board_id` was one hardcoded literal shared by every node;
+  `find_or_host_default_board/0` falls back to hosting its own copy
+  locally whenever the mesh lookup for that id doesn't resolve in time,
+  so beam01, beam02 and msi00 each ended up with a genuinely different
+  board answering to the SAME board_id -- found live ("check all nodes
+  + msi...the state of boards is messed up") after visiting `/boards`
+  on all three: beam01 and msi00 both showed "Untitled board", beam02
+  showed "Demo Video Board", all three under
+  `board-01a038649f9470078c0e2afaaaaea200`. `ListBoardsOverMesh.merge/1`
+  dedups by board_id ("first answer wins"), so a merged cross-node list
+  silently dropped two of the three every time. Fixed by deriving the id
+  from `Node.self()` (hashed with md5 to keep the required
+  `<prefix>-<32 hex>` reckon_gater_stream_id shape) instead of one fixed
+  literal -- still stable across restarts (Node.self() doesn't change
+  for a given deployed node), just no longer shared across nodes. The
+  three boards that had already collided under the old literal id are
+  now orphaned under that old id (still in the event store, just
+  unreachable via `/`) rather than migrated; all three held only
+  trivial placeholder content (1 stroke, default title) so nothing of
+  value was lost.
+
 - Toolbox clicks (tools, ink swatches, sticky-color swatches) could go
   silently dead in an already-open tab -- reported live ("it seems i
   cannot select the frame tool"). Root cause: `wireToolButtons`/

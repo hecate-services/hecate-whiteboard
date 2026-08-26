@@ -31,18 +31,35 @@ defmodule HecateWhiteboardWeb.BoardLive do
   alias QueryBoards.GetBoardSnapshotByIdOverMesh.GetBoardSnapshotByIdOverMesh
   alias TrackPresence.Roster
 
-  # One default board for this walking-skeleton phase -- board creation
-  # UX (multiple boards, a picker) is out of scope here; this proves
-  # host_board -> draw_stroke -> the browser, not board management.
+  # One default board per node for this walking-skeleton phase -- board
+  # creation UX (multiple boards, a picker) is out of scope here; this
+  # proves host_board -> draw_stroke -> the browser, not board management.
+  #
+  # Derived from this node's own identity (Node.self()) rather than one
+  # literal shared across the whole fleet -- a single hardcoded id here
+  # meant every node that couldn't reach the real host over the mesh in
+  # time (find_or_host_default_board/0's :not_found fallback) silently
+  # minted its OWN independent board under the SAME id, so beam01, beam02
+  # and msi00 ended up with three different boards answering to one
+  # board_id (found live 2026-08-26, see CHANGELOG). Node.self() is fixed
+  # per deployed node (distinct hecate_whiteboard@<host> per fleet box,
+  # :nonode@nohost for local dev), so this is still stable across restarts
+  # -- it just no longer collides across nodes.
   #
   # MUST be a real reckon_gater_stream_id shape (<prefix>-<32 hex>), not a
   # human-readable literal -- "board-default" hit exactly the antipattern
   # documented in this repo's own plan doc ({:invalid_stream_id, ...},
   # reckon_db_stream_path:id_nodes/1 crash-looping the store's gateway
-  # worker on every read). This one was minted once via
-  # reckon_gater_stream_id:new("board") and hardcoded so it's still fixed
-  # across restarts.
-  @default_board_id "board-01a038649f9470078c0e2afaaaaea200"
+  # worker on every read). Hashing Node.self() with md5 always yields 32
+  # hex chars, satisfying that shape without needing to mint+hardcode one
+  # per box by hand.
+  defp default_board_id do
+    "board-" <>
+      (Node.self()
+       |> Atom.to_string()
+       |> then(&:crypto.hash(:md5, &1))
+       |> Base.encode16(case: :lower))
+  end
 
   # join_board: a specific board_id from the URL, not necessarily hosted
   # on this node. Tries the local read model first (covers: this node IS
@@ -65,7 +82,7 @@ defmodule HecateWhiteboardWeb.BoardLive do
 
   def mount(_params, _session, socket) do
     {:ok, %{board: board, shapes: shapes}} = find_or_host_default_board()
-    {:ok, render_board(socket, @default_board_id, board, shapes)}
+    {:ok, render_board(socket, default_board_id(), board, shapes)}
   end
 
   defp render_board(socket, board_id, board, shapes) do
@@ -380,7 +397,7 @@ defmodule HecateWhiteboardWeb.BoardLive do
   # reflect the state this process just caused directly; the projection
   # catches up independently for any other reader (a reload, another tab).
   defp find_or_host_default_board do
-    case GetBoardSnapshotById.call(@default_board_id) do
+    case GetBoardSnapshotById.call(default_board_id()) do
       {:ok, %{board: board, shapes: shapes}} ->
         {:ok, %{board: ensure_hosted(board), shapes: shapes}}
 
@@ -400,18 +417,20 @@ defmodule HecateWhiteboardWeb.BoardLive do
     if :evoq_bit_flags.has(board.status, BoardStatus.hosted()) do
       board
     else
-      MaybeHostBoard.dispatch(%{board_id: @default_board_id})
+      MaybeHostBoard.dispatch(%{board_id: default_board_id()})
       %{board | status: :evoq_bit_flags.set(board.status, BoardStatus.hosted())}
     end
   end
 
-  # The default board's id is fixed (not minted), so it survives a process
-  # restart -- deliberate exception to InitiateBoardV1 normally minting
-  # one, since there's exactly one board in this phase. Dispatched via the
-  # raw evoq primitives rather than MaybeInitiateBoard.dispatch/1, which
-  # always mints a fresh id and has no way to accept a caller-supplied one.
+  # The default board's id is fixed per node (derived, not minted), so it
+  # survives a process restart -- deliberate exception to InitiateBoardV1
+  # normally minting one, since there's exactly one default board per node
+  # in this phase. Dispatched via the raw evoq primitives rather than
+  # MaybeInitiateBoard.dispatch/1, which always mints a fresh id and has no
+  # way to accept a caller-supplied one.
   defp initiate_default_board do
-    board = %{board_id: @default_board_id, owner: "host", title: "Untitled board"}
+    id = default_board_id()
+    board = %{board_id: id, owner: "host", title: "Untitled board"}
     # BoardAggregate.execute/2 pattern-matches on command_type -- forgetting
     # it here (leaving the aggregate-facing payload identical to the
     # returned board shape) is exactly the kind of skew this file's own
@@ -422,7 +441,7 @@ defmodule HecateWhiteboardWeb.BoardLive do
       :evoq_command.new(
         :initiate_board,
         GuideBoardLifecycle.BoardAggregate,
-        @default_board_id,
+        id,
         command_payload
       )
     )
