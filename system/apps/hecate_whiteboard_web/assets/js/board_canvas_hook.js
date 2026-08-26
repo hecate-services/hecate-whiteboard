@@ -146,6 +146,20 @@ function boundingBox(points) {
   return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
 }
 
+// The four resizable corners of a shape's bounding box, each paired with
+// its diagonally opposite corner -- the one that stays anchored while
+// THIS corner is dragged, since move_shape's own convention (two opposite
+// points) makes the anchor the other point of the pair.
+function resizeHandlePoints(shape) {
+  const box = boundingBox(shape.points);
+  return [
+    { corner: { x: box.minX, y: box.minY }, opposite: { x: box.maxX, y: box.maxY } },
+    { corner: { x: box.maxX, y: box.minY }, opposite: { x: box.minX, y: box.maxY } },
+    { corner: { x: box.minX, y: box.maxY }, opposite: { x: box.maxX, y: box.minY } },
+    { corner: { x: box.maxX, y: box.maxY }, opposite: { x: box.minX, y: box.minY } },
+  ];
+}
+
 function pointInBoundingBox(point, points, padding) {
   const box = boundingBox(points);
   return (
@@ -268,6 +282,7 @@ export const BoardCanvas = {
     this.domShapes = new Map(); // shape_id -> {el, kind, points, color, text} for stickies/text
     this.selection = new Map(); // shape_id -> "canvas" | "dom" -- zero, one, or many
     this.moving = null; // {startPoint, items: [{shapeId, kind, originalPoints}]} -- one drag, any mix of canvas/dom shapes
+    this.resizing = null; // {cancel} while a resize-handle drag is in progress
     this.marquee = null; // {start} while a select-tool drag over empty canvas is rubber-banding
     this.clipboard = null; // [{kind, points, color, width?, text?}, ...] -- copy/cut/paste, whole selection
 
@@ -634,6 +649,12 @@ export const BoardCanvas = {
     }
 
     if (this.activeTool === "select") {
+      const resizeHandle = this.hitTestResizeHandle(p);
+      if (resizeHandle) {
+        this.beginResize(resizeHandle.shapeId, resizeHandle.fixedCorner);
+        return;
+      }
+
       const hit = this.hitTestCanvasShape(p);
 
       if (hit) {
@@ -856,6 +877,8 @@ export const BoardCanvas = {
       this.clearCanvas(this.pending);
     } else if (this.moving) {
       this.moving.cancel();
+    } else if (this.resizing) {
+      this.resizing.cancel();
     } else if (this.marquee) {
       this.marquee.cancel();
     } else if (this.selection.size > 0) {
@@ -1029,6 +1052,25 @@ export const BoardCanvas = {
     });
   },
 
+  // Only the single currently-selected geometry shape's own four corners
+  // are ever live resize targets -- checked BEFORE hitTestCanvasShape in
+  // onCanvasDown so grabbing a handle wins over the shape underneath it
+  // (a handle always sits exactly on the shape's own edge/corner, so the
+  // two hit-test regions genuinely overlap).
+  hitTestResizeHandle(point) {
+    const canvasSelected = [...this.selection.entries()].filter(([, kind]) => kind === "canvas");
+    if (canvasSelected.length !== 1) return null;
+
+    const shape = this.shapes.find((s) => s.shape_id === canvasSelected[0][0]);
+    if (!shape || !GEOMETRY_KINDS.includes(shape.kind)) return null;
+
+    const threshold = RESIZE_HANDLE_PX / this.camera.zoom;
+    const handle = resizeHandlePoints(shape).find(
+      ({ corner }) => Math.hypot(point.x - corner.x, point.y - corner.y) <= threshold,
+    );
+    return handle ? { shapeId: shape.shape_id, fixedCorner: handle.opposite } : null;
+  },
+
   // Threshold divided by zoom, same reasoning as onCanvasUp's
   // minSize: point (and every stored shape point) is WORLD space, so a
   // fixed HIT_THRESHOLD_PX would feel impossibly precise when zoomed
@@ -1123,6 +1165,25 @@ export const BoardCanvas = {
         ctx.strokeRect(box.minX - 6, box.minY - 6, box.maxX - box.minX + 12, box.maxY - box.minY + 12);
         ctx.restore();
       });
+
+      // Resize handles only make sense for a single selected shape (what
+      // would dragging one handle mean for N shapes at once?) and only
+      // for the four "two opposite corners" kinds -- see RESIZE_HANDLE_PX
+      // above. Sized in world units scaled by 1/zoom, same reasoning as
+      // repositionCursors: a grab handle is a UI affordance, not board
+      // content, so it should stay a constant SCREEN size as you zoom.
+      if (canvasSelected.length === 1) {
+        const shape = this.shapes.find((s) => s.shape_id === canvasSelected[0][0]);
+        if (shape && GEOMETRY_KINDS.includes(shape.kind)) {
+          const handlePx = RESIZE_HANDLE_PX / this.camera.zoom;
+          ctx.save();
+          ctx.fillStyle = "#d89b4a";
+          resizeHandlePoints(shape).forEach(({ corner }) => {
+            ctx.fillRect(corner.x - handlePx / 2, corner.y - handlePx / 2, handlePx, handlePx);
+          });
+          ctx.restore();
+        }
+      }
     });
   },
 
@@ -1282,6 +1343,49 @@ export const BoardCanvas = {
             entry.el.style.setProperty("--sy", item.originalPoints[0].y + "px");
           });
 
+        this.clearCanvas(this.pending);
+        this.drawSelectionOutlines();
+      },
+    };
+  },
+
+  // Resize is architecturally identical to move (see move_shape and
+  // applyMove): both just replace a shape's `points` wholesale, so this
+  // dispatches the exact same command -- only the client needed new code
+  // at all. fixedCorner is the diagonally opposite corner and stays put
+  // for the whole drag; the dragged corner just follows the pointer,
+  // snapped like any other placement.
+  beginResize(shapeId, fixedCorner) {
+    const shape = this.shapes.find((s) => s.shape_id === shapeId);
+    let lastPoints = shape.points;
+    let moved = false;
+
+    const onMove = (moveEvent) => {
+      moved = true;
+      lastPoints = [fixedCorner, this.snapPoint(this.point(moveEvent))];
+      this.withCamera(this.pending, (ctx) => drawShape(ctx, { ...shape, points: lastPoints }));
+    };
+
+    const cleanupListeners = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    const onUp = () => {
+      cleanupListeners();
+      this.resizing = null;
+      if (moved) this.pushEvent("move_shape", { shape_id: shapeId, points: lastPoints });
+      this.clearCanvas(this.pending);
+      this.drawSelectionOutlines();
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+
+    this.resizing = {
+      cancel: () => {
+        cleanupListeners();
+        this.resizing = null;
         this.clearCanvas(this.pending);
         this.drawSelectionOutlines();
       },

@@ -7,6 +7,29 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- Resize handles for the four "two opposite corners" shape kinds
+  (rectangle/ellipse/triangle/frame -- the same set as `GEOMETRY_KINDS`,
+  a stroke has no single meaningful resize since its points are a whole
+  freehand path, not a box). Requested live alongside the arrow tool
+  ("the user should be able to resize elements"); built first since it's
+  self-contained and directly benefits the just-shipped Frame tool.
+  Architecturally identical to a move -- `move_shape` already replaces a
+  shape's `points` wholesale, so resize dispatches that exact same
+  command with `[fixedCorner, draggedPoint]`; zero backend changes
+  needed, confirmed via `applyMove`'s existing kind-agnostic handler.
+  Only appears for a single selected geometry shape (what would one
+  handle mean for N shapes at once?); four small squares at the corners,
+  sized in world units scaled by 1/zoom so they stay a constant screen
+  size, same reasoning as `repositionCursors`' own cursor markers.
+  Dragging one respects snap-to-grid via the same `snapPoint` every
+  other placement uses, and Escape cancels an in-progress resize back to
+  the shape's pre-drag bounds, matching `cancelGesture`'s existing
+  `moving`/`marquee` cancellation pattern. Verified live: resized a
+  rectangle and a frame, confirmed the new bounds persist after reload,
+  confirmed a corner lands exactly on a grid dot with Snap on, confirmed
+  Escape mid-drag reverts cleanly, and confirmed sticky/text (DOM
+  shapes) show no handles when selected.
+
 - Toolbox side pane: pen (existing), text, and selection tools, plus
   sticky notes in the classic Event Storming palette (orange Domain
   Event, blue Command, yellow Actor, purple Policy, green Read Model,
