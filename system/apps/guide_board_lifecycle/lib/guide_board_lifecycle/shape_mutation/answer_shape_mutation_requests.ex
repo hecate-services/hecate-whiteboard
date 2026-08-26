@@ -69,7 +69,9 @@ defmodule GuideBoardLifecycle.ShapeMutation.AnswerShapeMutationRequests do
             board_id: board_id,
             kind: field(:kind, fact),
             points: field(:points, fact),
-            color: field(:color, fact)
+            color: field(:color, fact),
+            from_shape_id: field(:from_shape_id, fact),
+            to_shape_id: field(:to_shape_id, fact)
           })
 
         other ->

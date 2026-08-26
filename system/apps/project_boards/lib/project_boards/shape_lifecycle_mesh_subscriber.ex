@@ -69,7 +69,9 @@ defmodule ProjectBoards.ShapeLifecycleMeshSubscriber do
       points: field(:points, fact),
       color: field(:color, fact),
       width: field(:width, fact),
-      text: field(:text, fact)
+      text: field(:text, fact),
+      from_shape_id: field(:from_shape_id, fact),
+      to_shape_id: field(:to_shape_id, fact)
     }
 
     if Store.new_shape?(shape.shape_id) do

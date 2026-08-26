@@ -133,7 +133,9 @@ defmodule QueryBoards.GetBoardSnapshotByIdOverMesh.GetBoardSnapshotByIdOverMesh 
       points: field(:points, shape),
       color: field(:color, shape),
       width: field(:width, shape),
-      text: field(:text, shape)
+      text: field(:text, shape),
+      from_shape_id: field(:from_shape_id, shape),
+      to_shape_id: field(:to_shape_id, shape)
     }
   end
 

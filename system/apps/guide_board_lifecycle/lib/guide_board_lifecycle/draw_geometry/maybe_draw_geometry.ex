@@ -24,7 +24,9 @@ defmodule GuideBoardLifecycle.DrawGeometry.MaybeDrawGeometry do
         shape_id: DrawGeometryV1.shape_id(cmd),
         kind: DrawGeometryV1.kind(cmd),
         points: DrawGeometryV1.points(cmd),
-        color: DrawGeometryV1.color(cmd)
+        color: DrawGeometryV1.color(cmd),
+        from_shape_id: DrawGeometryV1.from_shape_id(cmd),
+        to_shape_id: DrawGeometryV1.to_shape_id(cmd)
       })
 
     {:ok, [ShapeInitiatedV1.to_map(event)]}

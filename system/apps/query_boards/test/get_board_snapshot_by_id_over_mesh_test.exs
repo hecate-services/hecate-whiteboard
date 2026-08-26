@@ -37,7 +37,9 @@ defmodule QueryBoards.GetBoardSnapshotByIdOverMeshTest do
                points: [%{x: 1, y: 2}],
                color: "#f2efe6",
                width: 3,
-               text: nil
+               text: nil,
+               from_shape_id: nil,
+               to_shape_id: nil
              }
     end
 
@@ -56,7 +58,9 @@ defmodule QueryBoards.GetBoardSnapshotByIdOverMeshTest do
                points: [%{x: 84, y: 178}],
                color: "#f2994a",
                width: nil,
-               text: "video_viewed"
+               text: "video_viewed",
+               from_shape_id: nil,
+               to_shape_id: nil
              }
     end
 
@@ -74,7 +78,9 @@ defmodule QueryBoards.GetBoardSnapshotByIdOverMeshTest do
                points: [%{x: 53, y: 39}, %{x: 280, y: 110}],
                color: "#f2efe6",
                width: nil,
-               text: nil
+               text: nil,
+               from_shape_id: nil,
+               to_shape_id: nil
              }
     end
 
@@ -97,7 +103,9 @@ defmodule QueryBoards.GetBoardSnapshotByIdOverMeshTest do
                points: [%{x: 10, y: 20}],
                color: "#f2994a",
                width: nil,
-               text: "hello"
+               text: "hello",
+               from_shape_id: nil,
+               to_shape_id: nil
              }
     end
   end

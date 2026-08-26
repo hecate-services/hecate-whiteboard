@@ -20,9 +20,33 @@ defmodule GuideBoardLifecycle.ShapeLifecycle.ShapeInitiatedV1 do
   # different required inputs. Only the EVENT they end up producing is
   # shared, so there's no single from_command/1 here -- each Maybe*
   # handler builds the fields map itself from its own command struct.
+  #
+  # from_shape_id/to_shape_id (arrow only): which two shapes an arrow
+  # connects, so every viewer can recompute its CURRENT path from
+  # wherever those shapes are NOW -- not fixed points frozen at creation.
+  # `points` still carries the two endpoints as they were at creation
+  # time regardless of kind: for an arrow this is a FALLBACK only, used
+  # when a referenced shape_id can't be resolved (removed, or a
+  # freestanding endpoint with no shape_id at all). Moving/resizing a
+  # shape that an arrow points to costs nothing extra here -- the arrow
+  # itself is never re-emitted, its renderer just resolves the
+  # reference fresh on every draw. Same "computed live, nothing stored
+  # as a relationship" trick draw_geometry's own frame kind already
+  # uses for containment.
   @behaviour :evoq_event
 
-  defstruct [:board_id, :shape_id, :kind, :points, :color, :width, :text, :initiated_at]
+  defstruct [
+    :board_id,
+    :shape_id,
+    :kind,
+    :points,
+    :color,
+    :width,
+    :text,
+    :from_shape_id,
+    :to_shape_id,
+    :initiated_at
+  ]
 
   @impl true
   def event_type, do: "shape_initiated_v1"
@@ -37,6 +61,8 @@ defmodule GuideBoardLifecycle.ShapeLifecycle.ShapeInitiatedV1 do
       color: color,
       width: Map.get(fields, :width),
       text: Map.get(fields, :text),
+      from_shape_id: Map.get(fields, :from_shape_id),
+      to_shape_id: Map.get(fields, :to_shape_id),
       initiated_at: System.system_time(:millisecond)
     }
   end
@@ -52,6 +78,8 @@ defmodule GuideBoardLifecycle.ShapeLifecycle.ShapeInitiatedV1 do
       color: e.color,
       width: e.width,
       text: e.text,
+      from_shape_id: e.from_shape_id,
+      to_shape_id: e.to_shape_id,
       initiated_at: e.initiated_at
     }
   end

@@ -200,10 +200,17 @@ defmodule HecateWhiteboardWeb.BoardLive do
 
   def handle_event(
         "draw_geometry",
-        %{"kind" => kind, "points" => points, "color" => color},
+        %{"kind" => kind, "points" => points, "color" => color} = raw_params,
         socket
       ) do
-    params = %{board_id: socket.assigns.board_id, kind: kind, points: points, color: color}
+    params = %{
+      board_id: socket.assigns.board_id,
+      kind: kind,
+      points: points,
+      color: color,
+      from_shape_id: Map.get(raw_params, "from_shape_id"),
+      to_shape_id: Map.get(raw_params, "to_shape_id")
+    }
 
     if socket.assigns.hosted?,
       do: MaybeDrawGeometry.dispatch(params),

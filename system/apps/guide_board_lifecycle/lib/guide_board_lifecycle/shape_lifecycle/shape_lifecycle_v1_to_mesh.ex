@@ -47,7 +47,9 @@ defmodule GuideBoardLifecycle.ShapeLifecycle.ShapeLifecycleV1ToMesh do
       points: field(:points, data),
       color: field(:color, data),
       width: field(:width, data),
-      text: field(:text, data)
+      text: field(:text, data),
+      from_shape_id: field(:from_shape_id, data),
+      to_shape_id: field(:to_shape_id, data)
     }
 
     publish(event_type, fact)

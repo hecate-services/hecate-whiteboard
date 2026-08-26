@@ -121,6 +121,38 @@ function drawFrame(ctx, shape) {
   ctx.restore();
 }
 
+// A line + arrowhead between shape.points[0] and [1]. Purely a dumb
+// renderer, like every other drawXxx function here -- shape.points is
+// expected to already be the CURRENT, resolved endpoints by the time
+// this runs (see the hook's own resolvedPoints/resolveArrowEndpoints,
+// which handle turning from_shape_id/to_shape_id into live coordinates
+// before ever calling drawShape). This function has no idea an arrow
+// can even reference another shape.
+function drawArrow(ctx, shape) {
+  const [from, to] = shape.points;
+  const angle = Math.atan2(to.y - from.y, to.x - from.x);
+  const headLen = 12;
+
+  ctx.save();
+  ctx.strokeStyle = shape.color;
+  ctx.fillStyle = shape.color;
+  ctx.lineWidth = 2;
+
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(to.x, to.y);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(to.x, to.y);
+  ctx.lineTo(to.x - headLen * Math.cos(angle - Math.PI / 6), to.y - headLen * Math.sin(angle - Math.PI / 6));
+  ctx.lineTo(to.x - headLen * Math.cos(angle + Math.PI / 6), to.y - headLen * Math.sin(angle + Math.PI / 6));
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+}
+
 // Single dispatch point for every canvas-rendered shape kind -- used by
 // the confirmed-shape layer, the live drag-to-size preview, and the
 // live selected-shape-move preview, so all three always agree on what
@@ -135,9 +167,36 @@ function drawShape(ctx, shape) {
       return drawTriangle(ctx, shape);
     case "frame":
       return drawFrame(ctx, shape);
+    case "arrow":
+      return drawArrow(ctx, shape);
     default:
       return drawStroke(ctx, shape);
   }
+}
+
+// The point on box's perimeter along the ray from its center toward
+// towardPoint -- how an arrow endpoint "snaps to the edge" of a
+// connected shape instead of overlapping its interior. towardPoint
+// equal to the center itself (a degenerate zero-size box, or two
+// shapes stacked exactly on top of each other) falls back to the
+// center rather than dividing by zero.
+function boxCenter(box) {
+  return { x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 };
+}
+
+function clipToBox(box, towardPoint) {
+  const center = boxCenter(box);
+  const dx = towardPoint.x - center.x;
+  const dy = towardPoint.y - center.y;
+  if (dx === 0 && dy === 0) return center;
+
+  const halfW = Math.max((box.maxX - box.minX) / 2, 0.01);
+  const halfH = Math.max((box.maxY - box.minY) / 2, 0.01);
+  const tX = dx === 0 ? Infinity : halfW / Math.abs(dx);
+  const tY = dy === 0 ? Infinity : halfH / Math.abs(dy);
+  const t = Math.min(tX, tY, 1);
+
+  return { x: center.x + dx * t, y: center.y + dy * t };
 }
 
 function boundingBox(points) {
@@ -224,6 +283,7 @@ const CURSOR_BY_TOOL = {
   ellipse: "crosshair",
   triangle: "crosshair",
   frame: "crosshair",
+  arrow: "crosshair",
 };
 
 // How long a peer's pointer must sit still before this browser tells the
@@ -276,6 +336,7 @@ export const BoardCanvas = {
     this.points = [];
     this.drawing = false;
     this.drawingGeometry = null; // {kind, start} while a shape tool's drag is in progress
+    this.drawingArrow = null; // {fromShapeId, start} while the arrow tool's drag is in progress
     this.ghostEl = null; // live placement preview while the sticky tool is armed
 
     this.shapes = []; // every confirmed canvas shape (stroke/rectangle/ellipse/triangle)
@@ -305,6 +366,16 @@ export const BoardCanvas = {
     this.handleEvent("shapes:snapshot", ({ shapes }) => {
       shapes.forEach((s) => this.renderShape(s));
       this.updateEmptyState(shapes.length > 0);
+
+      // An arrow can land in this list BEFORE the shape it references
+      // (snapshot order isn't creation order), so its very first paint
+      // via renderCanvasShape may resolve against a shape that doesn't
+      // exist in this.shapes/domShapes yet and fall back to its stored
+      // (possibly stale) points. One full redraw after every shape in
+      // the batch is loaded guarantees every reference resolves against
+      // the COMPLETE picture, not whatever partial state existed
+      // mid-batch.
+      this.redrawCommitted();
     });
 
     this.handleEvent("shapes:append", (stroke) => {
@@ -407,8 +478,8 @@ export const BoardCanvas = {
     this.withCamera(this.committed, (ctx) => {
       const frames = this.shapes.filter((s) => s.kind === "frame");
       const rest = this.shapes.filter((s) => s.kind !== "frame");
-      frames.forEach((s) => drawShape(ctx, s));
-      rest.forEach((s) => drawShape(ctx, s));
+      frames.forEach((s) => drawShape(ctx, { ...s, points: this.resolvedPoints(s) }));
+      rest.forEach((s) => drawShape(ctx, { ...s, points: this.resolvedPoints(s) }));
     });
   },
 
@@ -648,6 +719,17 @@ export const BoardCanvas = {
       return;
     }
 
+    // Kept OUTSIDE GEOMETRY_KINDS on purpose -- an arrow's two points are
+    // literal endpoints, not opposite corners of a box, and starting a
+    // drag ON a shape must snap to it rather than starting a fresh
+    // free-floating point there. fromShapeId null (started on empty
+    // canvas) makes this a plain freestanding endpoint, same as clicking
+    // empty canvas at the END does for the other side (see onCanvasUp).
+    if (this.activeTool === "arrow") {
+      this.drawingArrow = { fromShapeId: this.hitTestAnyShapeId(p), start: this.snapPoint(p) };
+      return;
+    }
+
     if (this.activeTool === "select") {
       const resizeHandle = this.hitTestResizeHandle(p);
       if (resizeHandle) {
@@ -710,6 +792,15 @@ export const BoardCanvas = {
       return;
     }
 
+    if (this.drawingArrow) {
+      const p = this.point(e);
+      const { fromShapeId, start } = this.drawingArrow;
+      const toShapeId = this.hitTestAnyShapeId(p);
+      const points = this.resolveArrowEndpoints(fromShapeId, start, toShapeId, this.snapPoint(p));
+      this.withCamera(this.pending, (ctx) => drawShape(ctx, { kind: "arrow", points, color: this.color }));
+      return;
+    }
+
     // Moving and marquee-select both track the pointer at the WINDOW
     // level (started by beginMove/beginMarquee), not here -- a drag
     // needs to keep tracking even if the pointer leaves the canvas
@@ -753,6 +844,30 @@ export const BoardCanvas = {
       if (Math.abs(p.x - start.x) >= minSize || Math.abs(p.y - start.y) >= minSize) {
         this.pushEvent("draw_geometry", { kind, points: [start, p], color: this.color });
       }
+      return;
+    }
+
+    if (this.drawingArrow) {
+      const p = this.point(e);
+      this.clearCanvas(this.pending);
+
+      const { fromShapeId, start } = this.drawingArrow;
+      const toShapeId = this.hitTestAnyShapeId(p);
+      this.drawingArrow = null;
+
+      const [fromPoint, toPoint] = this.resolveArrowEndpoints(fromShapeId, start, toShapeId, this.snapPoint(p));
+
+      const minSize = MIN_GEOMETRY_SIZE_PX / this.camera.zoom;
+      if (Math.abs(toPoint.x - fromPoint.x) >= minSize || Math.abs(toPoint.y - fromPoint.y) >= minSize) {
+        this.pushEvent("draw_geometry", {
+          kind: "arrow",
+          points: [fromPoint, toPoint],
+          color: this.color,
+          from_shape_id: fromShapeId,
+          to_shape_id: toShapeId,
+        });
+      }
+      return;
     }
 
     // Moving and marquee-select finish at the window level (see
@@ -874,6 +989,9 @@ export const BoardCanvas = {
       this.clearCanvas(this.pending);
     } else if (this.drawingGeometry) {
       this.drawingGeometry = null;
+      this.clearCanvas(this.pending);
+    } else if (this.drawingArrow) {
+      this.drawingArrow = null;
       this.clearCanvas(this.pending);
     } else if (this.moving) {
       this.moving.cancel();
@@ -1052,6 +1170,83 @@ export const BoardCanvas = {
     });
   },
 
+  // The world-space bounding box of ANY shape, canvas or DOM, by id --
+  // an arrow needs this to know what it's pointing at regardless of
+  // which rendering substrate the target uses (see this file's own
+  // header for why shapes split across the two). Sticky/text sizing
+  // comes straight from the rendered DOM element's own box: sticky is a
+  // fixed CSS size, text auto-sizes to its content, and since the whole
+  // shapes-layer is scaled together by the camera (see mounted's own
+  // comment on that transform), offsetWidth/offsetHeight are already in
+  // WORLD units with no zoom division needed. Returns null for an
+  // unresolvable id (removed, or never existed) -- every caller treats
+  // that as "fall back to whatever fixed point I already have".
+  shapeBoundingBox(shapeId) {
+    const canvasShape = this.shapes.find((s) => s.shape_id === shapeId);
+    if (canvasShape) return boundingBox(canvasShape.points);
+
+    const entry = this.domShapes.get(shapeId);
+    if (entry) {
+      const { x, y } = entry.points[0];
+      return { minX: x, minY: y, maxX: x + entry.el.offsetWidth, maxY: y + entry.el.offsetHeight };
+    }
+
+    return null;
+  },
+
+  // point-in-any-shape, canvas or DOM -- what the arrow tool's drag
+  // gesture uses to decide what it's hovering/landing on. Canvas shapes
+  // reuse hitTestCanvasShape's own threshold-aware test; DOM shapes have
+  // no equivalent (their hit-testing today is native browser click
+  // targets via onShapeDown, never a geometric test), so this is the
+  // one place that needs a plain point-in-box check for them.
+  hitTestAnyShapeId(point) {
+    const canvasHit = this.hitTestCanvasShape(point);
+    if (canvasHit) return canvasHit.shape_id;
+
+    for (const shapeId of this.domShapes.keys()) {
+      const box = this.shapeBoundingBox(shapeId);
+      if (box && point.x >= box.minX && point.x <= box.maxX && point.y >= box.minY && point.y <= box.maxY) {
+        return shapeId;
+      }
+    }
+    return null;
+  },
+
+  // The live-resolved endpoints of an arrow currently being DRAWN (not
+  // yet a stored shape) -- shared by onCanvasMove's preview and
+  // onCanvasUp's finish, so both always agree on where it would land.
+  // fromFallback/toFallback are used only for whichever end ISN'T
+  // attached to a shape_id. Same clipToBox trick as resolvedPoints
+  // below, just against a live in-progress endpoint instead of a
+  // stored shape's own fallback points.
+  resolveArrowEndpoints(fromShapeId, fromFallback, toShapeId, toFallback) {
+    const fromBox = fromShapeId ? this.shapeBoundingBox(fromShapeId) : null;
+    const toBox = toShapeId ? this.shapeBoundingBox(toShapeId) : null;
+    const fromAim = toBox ? boxCenter(toBox) : toFallback;
+    const toAim = fromBox ? boxCenter(fromBox) : fromFallback;
+
+    return [fromBox ? clipToBox(fromBox, fromAim) : fromFallback, toBox ? clipToBox(toBox, toAim) : toFallback];
+  },
+
+  // The live-resolved points to actually DRAW a shape with -- a no-op
+  // for every kind except arrow, where from_shape_id/to_shape_id (when
+  // present) win over the shape's own stored `points`, which are just
+  // the fallback captured at creation time. This is the ONE place that
+  // turns a stored shape_id reference into real coordinates; every
+  // draw call site (redrawCommitted, renderCanvasShape) and every
+  // geometric query against an arrow's position (hitTestCanvasShape,
+  // shapesWithinRect) goes through this, so an arrow always hit-tests
+  // and redraws at exactly where it's currently VISIBLE, not wherever
+  // it happened to be pointing when it was created. Moving/resizing the
+  // shape an arrow points to costs nothing here -- no event, no stored
+  // relationship to update, just a fresh lookup on the next draw.
+  resolvedPoints(shape) {
+    if (shape.kind !== "arrow") return shape.points;
+    const [fallbackFrom, fallbackTo] = shape.points;
+    return this.resolveArrowEndpoints(shape.from_shape_id, fallbackFrom, shape.to_shape_id, fallbackTo);
+  },
+
   // Only the single currently-selected geometry shape's own four corners
   // are ever live resize targets -- checked BEFORE hitTestCanvasShape in
   // onCanvasDown so grabbing a handle wins over the shape underneath it
@@ -1079,8 +1274,14 @@ export const BoardCanvas = {
   hitTestCanvasShape(point) {
     const threshold = HIT_THRESHOLD_PX / this.camera.zoom;
     const hits = (shape) => {
-      if (shape.kind === "stroke") return this.strokeHit(point, shape, threshold);
-      return pointInBoundingBox(point, shape.points, threshold);
+      const points = this.resolvedPoints(shape);
+      if (shape.kind === "stroke") return this.strokeHit(point, { ...shape, points }, threshold);
+      // A thin diagonal line's own bounding box is mostly empty space --
+      // segment distance (same precision strokes get) instead of the
+      // box-fill test every other kind uses, or clicking near the middle
+      // of a long arrow would almost never actually hit it.
+      if (shape.kind === "arrow") return distanceToSegment(point, points[0], points[1]) <= threshold;
+      return pointInBoundingBox(point, points, threshold);
     };
 
     // Frames checked LAST -- a frame's own bounding box legitimately
@@ -1203,7 +1404,7 @@ export const BoardCanvas = {
 
   renderCanvasShape(shape) {
     this.shapes.push(shape);
-    this.drawWithCamera(this.committed, (ctx) => drawShape(ctx, shape));
+    this.drawWithCamera(this.committed, (ctx) => drawShape(ctx, { ...shape, points: this.resolvedPoints(shape) }));
   },
 
   renderDomShape(shape) {
@@ -1457,7 +1658,7 @@ export const BoardCanvas = {
     const selection = new Map();
 
     this.shapes.forEach((shape) => {
-      const box = boundingBox(shape.points);
+      const box = boundingBox(this.resolvedPoints(shape));
       const intersects =
         box.minX <= rect.maxX && box.maxX >= rect.minX && box.minY <= rect.maxY && box.maxY >= rect.minY;
       if (intersects) selection.set(shape.shape_id, "canvas");
@@ -1487,6 +1688,11 @@ export const BoardCanvas = {
       entry.points = points;
       entry.el.style.setProperty("--sx", points[0].x + "px");
       entry.el.style.setProperty("--sy", points[0].y + "px");
+      // A moved sticky/text isn't itself on the canvas, but an arrow
+      // pointing AT it lives there and needs to follow -- redrawCommitted
+      // re-resolves every arrow's live endpoints fresh, so this is the
+      // one place a DOM-shape move needs to reach back into canvas land.
+      this.redrawCommitted();
     }
   },
 

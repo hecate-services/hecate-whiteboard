@@ -7,6 +7,72 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- Arrow tool, with live-reference attachment: dragging from/to an
+  existing shape snaps that endpoint to the shape's EDGE (the point on
+  its bounding box closest to the other end, so the arrow visually
+  touches rather than overlaps -- requested live, "lines and arrows
+  should snap to the boxes... a freestanding line/arrow rarely is
+  meaningful"), and every viewer resolves the CURRENT position of both
+  endpoints on every redraw, not fixed points frozen at creation.
+  Moving or resizing a shape that ten arrows point at costs nothing
+  extra -- no new event, no stored relationship to update, the arrow
+  itself is never re-emitted. Endpoints not snapped to anything are
+  ordinary freestanding points, same as any other geometry shape's
+  corners.
+  - Schema: `shape_initiated_v1` grows two optional fields,
+    `from_shape_id`/`to_shape_id`, alongside `points` (which still
+    carries the two endpoints as of creation time -- now a FALLBACK,
+    used whenever a referenced shape_id can't be resolved: removed, a
+    freestanding endpoint, or a client that hasn't loaded it yet).
+    Unvalidated against any existing shape server-side, same trust
+    boundary `points` itself already has -- resolving the live position
+    from an id is entirely a client rendering concern, the same
+    "computed live, nothing stored as a relationship" trick `frame`'s
+    containment already uses. `draw_geometry` carries the two ids
+    through unchanged everywhere a shape's other optional fields
+    (width/text) already flow: the command, the local projection, the
+    mesh emitter/subscriber pair, and join_board's mesh-snapshot
+    normalizer -- the same set of touch points the msi00-inconsistency
+    bug (below) already established as needing to move together.
+  - Rendering: a new `resolvedPoints(shape)` hook method is the ONE
+    place that turns a stored `from_shape_id`/`to_shape_id` into real
+    coordinates -- `clipToBox` walks a ray from the target shape's
+    center toward the other endpoint and stops at the box edge. Every
+    site that previously read a canvas shape's `points` directly now
+    goes through it: `redrawCommitted`/`renderCanvasShape` (drawing),
+    `hitTestCanvasShape` (selection -- an arrow now hit-tests via
+    segment distance like a stroke, not the box-fill test rectangle/
+    ellipse/triangle/frame use, since a thin diagonal line's own
+    bounding box is mostly empty space), and `shapesWithinRect`
+    (marquee-select and a frame's own "what's inside me" grab). A
+    connected DOM shape (sticky/text) moving also needed
+    `applyMove`'s DOM branch to gain a `redrawCommitted()` call it
+    never previously needed, since a moved sticky isn't itself on the
+    canvas but an arrow pointing at it lives there. `shapes:snapshot`
+    now does one full `redrawCommitted()` after the whole batch loads,
+    since an arrow can land in that list before the shape it
+    references (snapshot order isn't creation order) and its first
+    single-shape paint would otherwise resolve against a still-partial
+    picture.
+  - No cascade-delete: removing a shape an arrow points to leaves the
+    arrow rendering at its stored fallback (creation-time) position,
+    not the shape's last position before removal -- simple, well-
+    defined, and avoids the event traffic a "keep it fresh" fallback
+    would cost. Re-pointing an existing arrow's endpoint to a
+    different shape after creation isn't in this cut, only
+    creation-time snapping.
+  - Verified live: two rectangles connected end-to-end with the
+    arrowhead landing exactly on each edge; moved one rectangle and
+    confirmed the arrow followed with zero extra events (checked the
+    server log); reloaded and confirmed the connection survives a
+    fresh snapshot load regardless of shape order; selected the arrow
+    by clicking near its LIVE (not stale) line; deleted it cleanly;
+    drew a freestanding arrow with both endpoints on empty canvas;
+    confirmed Escape cancels an in-progress arrow drag; confirmed no
+    resize handles appear on an arrow; connected an arrow to a sticky
+    note (the DOM-shape/canvas-shape bounding-box unification) and
+    confirmed it followed the sticky when moved.
+
 - Resize handles for the four "two opposite corners" shape kinds
   (rectangle/ellipse/triangle/frame -- the same set as `GEOMETRY_KINDS`,
   a stroke has no single meaningful resize since its points are a whole
