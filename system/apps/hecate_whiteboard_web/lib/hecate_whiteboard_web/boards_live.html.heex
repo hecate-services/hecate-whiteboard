@@ -45,6 +45,48 @@
               </span>
             </span>
           </a>
+          <button
+            type="button"
+            class="board-card-action"
+            phx-click="archive"
+            phx-value-board_id={board.board_id}
+            data-confirm={"Archive \"#{board.title}\"? It becomes read-only and drops off the mesh picker until unarchived."}
+            title="Archive this board -- read-only, hidden from discovery, reversible."
+          >
+            Archive
+          </button>
+        </li>
+      </ul>
+    <% end %>
+
+    <%= if @archived_boards != [] do %>
+      <h2 class="boards-section-heading">Archived</h2>
+      <ul class="board-list">
+        <li :for={board <- @archived_boards} class="board-card board-card-archived">
+          <a href={"/board/" <> board.board_id}>
+            <span class="board-card-title">{board.title}</span>
+            <span class="board-card-meta">
+              <span class="mono">{board.owner}</span>
+              <span class="status-sep">·</span>
+              {board.stroke_count} {if board.stroke_count == 1, do: "stroke", else: "strokes"}
+              <span class="status-sep">·</span>
+              <span
+                class="board-card-badge"
+                title="Read-only. Hidden from the mesh picker on other nodes."
+              >
+                archived
+              </span>
+            </span>
+          </a>
+          <button
+            type="button"
+            class="board-card-action"
+            phx-click="unarchive"
+            phx-value-board_id={board.board_id}
+            title="Unarchive this board -- reopens it for drawing and mesh discovery."
+          >
+            Unarchive
+          </button>
         </li>
       </ul>
     <% end %>

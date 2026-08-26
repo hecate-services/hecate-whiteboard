@@ -7,6 +7,64 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- Archive/Unarchive buttons on `/boards`, wiring up a desk pair
+  (`archive_board`/`unarchive_board`, the death/rebirth ends of the
+  board lifecycle) that was fully built -- command, event, aggregate
+  guard, projection, mesh emitter/subscriber, even a
+  `board_lifecycle_mesh_subscriber` topic and a client-side
+  `BoardStatus.archived()` bit already consumed by
+  `AnswerBoardSnapshotQueries` and `board_live.ex`'s own read-only
+  rendering -- but never exposed through any UI. `unarchive_board` is
+  the new half, mirroring `archive_board` exactly (command/event/
+  handler/aggregate guard `not_archived`/projection clears the bit via
+  `evoq_bit_flags.unset/2`/mesh topic). A new `ListArchivedBoards` query
+  (NOT a broadened filter on the existing `ListHostedBoards`) surfaces a
+  node's own archived boards for the Unarchive button -- kept as a
+  separate desk specifically so an archived board can never become
+  mesh-discoverable again just because the LOCAL picker also wants to
+  list it: `ListHostedBoards.call/0` is also what
+  `AnswerBoardListQueries` answers "what do you host" queries from other
+  nodes with, and broadening its filter would have silently un-hidden
+  every archived board fleet-wide.
+  - The remote-board picker's own accumulator needed a real fix, not
+    just an addition: `merge_remote_fact/4` used to DELETE a board from
+    its map entirely on `board_archived_v1` ("no un-archiving path to
+    reconcile against later," true until this commit) -- now that
+    `board_unarchived_v1` exists, deleting would have lost title/owner/
+    host, so a later unarchive fact would have reappeared blank. Fixed
+    to keep the entry and just track the bit like every other status
+    transition; `remote_boards/1` now filters archived ones out of the
+    rendered list instead, which correctly lets an unarchive fact bring
+    the board back with its full info intact.
+  - Archive/unarchive is host-only (`MaybeArchiveBoard`/
+    `MaybeUnarchiveBoard` have no `relay/1`, unlike the shape-mutation
+    desks), matching that the buttons only ever render in the "hosted
+    here" list.
+  - **A real race found live while testing this**: `handle_event`'s
+    success branch used to re-query `ListHostedBoards`/`ListArchivedBoards`
+    immediately after `dispatch/1` returned `{:ok, ...}` -- but that
+    return only confirms the event was WRITTEN, not that
+    `BoardLifecycleToBoards` (a separate async projection) has already
+    applied it to the ETS read model. Reproduced consistently: the
+    archive genuinely succeeded server-side every time (confirmed via a
+    second click correctly hitting the aggregate's `:already_archived`
+    guard), but the board never visibly moved lists. Fixed by removing
+    the eager re-query entirely and relying on the projection's own
+    `{:board_updated, ...}` PubSub broadcast (already fired on
+    "board:<id>" after every ETS write, previously unconsumed by this
+    LiveView) via a new `handle_info({:board_updated, _}, socket)` that
+    re-derives both lists at the point they're actually safe to read.
+    That in turn needed `sync_presence_subscriptions/1` to track
+    `archived_boards`' ids too, not just `boards` -- without it, the
+    FIRST archive un-subscribed from the board's own topic (no longer in
+    the "current" set) and every SUBSEQUENT transition silently stopped
+    arriving.
+  - Verified live: archived a board, confirmed it moved to a new
+    "Archived" section immediately (no reload) with the read-only
+    badge; unarchived it, confirmed it moved back immediately; repeated
+    the cycle twice more to confirm the subscription fix holds across
+    repeated transitions, not just the first one.
+
 - Arrow tool, with live-reference attachment: dragging from/to an
   existing shape snaps that endpoint to the shape's EDGE (the point on
   its bounding box closest to the other end, so the arrow visually

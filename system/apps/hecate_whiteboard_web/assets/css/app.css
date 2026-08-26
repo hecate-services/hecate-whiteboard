@@ -722,7 +722,19 @@ a.brand:hover {
   gap: 0.5rem;
 }
 
+/* .board-card itself is the flex row when it carries a sibling action
+   button (Archive/Unarchive) -- the anchor stays a self-contained card
+   (flex: 1) so archived-board rows and remote/pending rows, which have
+   no button, don't need their own separate layout rule. */
+.board-card {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .board-card a {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -738,6 +750,27 @@ a.brand:hover {
 
 .board-card a:hover {
   border-color: var(--amber);
+}
+
+.board-card-archived a {
+  opacity: 0.65;
+}
+
+.board-card-action {
+  flex-shrink: 0;
+  background: transparent;
+  color: var(--chalk-dim);
+  border: 1px solid var(--slate-line);
+  border-radius: 8px;
+  padding: 0.55rem 0.8rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.board-card-action:hover {
+  border-color: var(--amber);
+  color: var(--chalk);
 }
 
 .board-card-pending {

@@ -8,9 +8,12 @@ defmodule HecateWhiteboardWeb.BoardsLive do
   # doesn't grant write access to anything it didn't already have.
   use Phoenix.LiveView
 
+  alias GuideBoardLifecycle.ArchiveBoard.MaybeArchiveBoard
   alias GuideBoardLifecycle.BoardStatus
   alias GuideBoardLifecycle.HostBoard.MaybeHostBoard
   alias GuideBoardLifecycle.InitiateBoard.MaybeInitiateBoard
+  alias GuideBoardLifecycle.UnarchiveBoard.MaybeUnarchiveBoard
+  alias QueryBoards.ListArchivedBoards.ListArchivedBoards
   alias QueryBoards.ListBoardsOverMesh.ListBoardsOverMesh
   alias QueryBoards.ListHostedBoards.ListHostedBoards
   alias TrackPresence.Roster
@@ -37,11 +40,13 @@ defmodule HecateWhiteboardWeb.BoardsLive do
   @impl true
   def mount(_params, _session, socket) do
     boards = ListHostedBoards.call()
+    archived_boards = ListArchivedBoards.call()
 
     socket =
       socket
       |> assign(
         boards: boards,
+        archived_boards: archived_boards,
         remote_board_facts: %{},
         remote_boards_loading?: connected?(socket),
         presence_counts: %{},
@@ -135,11 +140,11 @@ defmodule HecateWhiteboardWeb.BoardsLive do
        start_async(socket, :discover_remote_boards, fn -> ListBoardsOverMesh.call() end)}
 
   # Live half of the same picture: GuideBoardLifecycle.BoardLifecycleV1ToMesh
-  # publishes each of the four board-lifecycle events on its own topic
+  # publishes each of the five board-lifecycle events on its own topic
   # (see that module's doc for why NOT one shared topic), so
-  # ProjectBoards.BoardLifecycleMeshSubscriber re-broadcasts all four
+  # ProjectBoards.BoardLifecycleMeshSubscriber re-broadcasts all five
   # locally as one uniform {:remote_board_event, event_type, fact}
-  # message -- this is the one place that needs to know about all four,
+  # message -- this is the one place that needs to know about all five,
   # so branching on event_type here instead of at the mesh layer is the
   # right spot for it.
   #
@@ -171,10 +176,35 @@ defmodule HecateWhiteboardWeb.BoardsLive do
     end
   end
 
+  # ProjectBoards.BoardLifecycleToBoards broadcasts this on "board:<id>"
+  # AFTER it writes the ETS row -- this LiveView already subscribes to
+  # every locally-hosted board_id's own topic via
+  # sync_presence_subscriptions/1 (for presence), so archive/unarchive/
+  # rename land here for free. Re-deriving BOTH lists from the read model
+  # rather than patching the one board_id in place: whether an update
+  # belongs in @boards or @archived_boards depends on the SAME status
+  # bits ListHostedBoards/ListArchivedBoards already interpret, so
+  # re-running those two cheap ETS scans is simpler and can't drift from
+  # what a fresh page load would show. This is also WHY
+  # handle_event("archive"/"unarchive", ...) doesn't refetch immediately
+  # after dispatch: the command's own {:ok, ...} return only confirms the
+  # EVENT was written, not that this handler has already run against it,
+  # so re-querying right there raced the projection and showed stale
+  # state -- confirmed live, the button worked but the board never
+  # visibly moved lists until now.
+  @impl true
+  def handle_info({:board_updated, _updated}, socket) do
+    socket =
+      socket
+      |> assign(boards: ListHostedBoards.call(), archived_boards: ListArchivedBoards.call())
+      |> sync_presence_subscriptions()
+
+    {:noreply, socket}
+  end
+
   # Recomputes only the one board_id the event is actually about --
   # cheap (a single ETS match) and can't drift, since it's driven by
   # the exact same touch/remove that updated Roster's own table.
-  @impl true
   def handle_info({:cursor_settled, board_id, _cursor}, socket),
     do: {:noreply, refresh_presence_count(socket, board_id)}
 
@@ -201,6 +231,7 @@ defmodule HecateWhiteboardWeb.BoardsLive do
     current_ids =
       MapSet.new(
         Enum.map(socket.assigns.boards, & &1.board_id) ++
+          Enum.map(socket.assigns.archived_boards, & &1.board_id) ++
           Map.keys(socket.assigns.remote_board_facts)
       )
 
@@ -236,6 +267,39 @@ defmodule HecateWhiteboardWeb.BoardsLive do
     end
   end
 
+  # Archive/unarchive are host-only actions -- MaybeArchiveBoard/
+  # MaybeUnarchiveBoard have no relay/1 (unlike the shape-mutation desks),
+  # matching that this button only ever renders on a board THIS node
+  # hosts (see the template: the "hosted here" list, never "on other
+  # nodes"). Deliberately does NOT assign boards/archived_boards here on
+  # success -- see handle_info({:board_updated, ...}) above for why an
+  # eager re-query at this exact point reads the projection before it's
+  # caught up. This LiveView is already subscribed to this board_id's
+  # topic (sync_presence_subscriptions/1), so the broadcast that
+  # handler reacts to arrives within the same round trip in practice.
+  @impl true
+  def handle_event("archive", %{"board_id" => board_id}, socket) do
+    case MaybeArchiveBoard.dispatch(%{board_id: board_id}) do
+      {:ok, _version, _events} ->
+        {:noreply, socket}
+
+      {:error, reason} ->
+        Logger.warning("[BoardsLive] archive #{board_id}: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "Couldn't archive that board.")}
+    end
+  end
+
+  def handle_event("unarchive", %{"board_id" => board_id}, socket) do
+    case MaybeUnarchiveBoard.dispatch(%{board_id: board_id}) do
+      {:ok, _version, _events} ->
+        {:noreply, socket}
+
+      {:error, reason} ->
+        Logger.warning("[BoardsLive] unarchive #{board_id}: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "Couldn't unarchive that board.")}
+    end
+  end
+
   defp default_title(""), do: "Untitled board"
   defp default_title(title), do: title
 
@@ -254,13 +318,18 @@ defmodule HecateWhiteboardWeb.BoardsLive do
     end
   end
 
-  # An archived remote board drops out entirely, mirroring
-  # QueryBoards.ListHostedBoards' own "hosted AND NOT archived" filter --
-  # once gone it's gone, there's no un-archiving path to reconcile
-  # against later.
-  defp merge_remote_fact(facts, board_id, "board_archived_v1", _fact),
-    do: Map.delete(facts, board_id)
-
+  # An archived remote board now just carries the archived bit, same as
+  # every other status transition -- kept in the map rather than deleted
+  # (the ORIGINAL reasoning here, "once gone it's gone, no un-archiving
+  # path to reconcile against later," stopped being true the moment
+  # unarchive_board existed: deleting on archive would have silently lost
+  # title/owner/host, so a later board_unarchived_v1 fact would have
+  # nothing to merge onto and reappeared blank). remote_boards/1 below is
+  # the one place that filters archived ones out of the rendered list,
+  # matching ListHostedBoards' own "hosted AND NOT archived" filter for
+  # the LOCAL list -- filtering at render time (not accumulation time)
+  # means an unarchive fact correctly makes the board reappear with its
+  # full info intact, not a blank slot.
   defp merge_remote_fact(facts, board_id, event_type, fact) do
     existing =
       Map.get(facts, board_id, %{board_id: board_id, title: nil, owner: nil, host: nil, status: 0})
@@ -270,15 +339,25 @@ defmodule HecateWhiteboardWeb.BoardsLive do
       | title: fact[:title] || existing.title,
         owner: fact[:owner] || existing.owner,
         host: fact[:host] || existing.host,
-        status: :evoq_bit_flags.set(existing.status, status_bit(event_type))
+        status: apply_status_bit(existing.status, event_type)
     }
 
     Map.put(facts, board_id, updated)
   end
 
-  defp status_bit("board_initiated_v1"), do: BoardStatus.initiated()
-  defp status_bit("board_hosted_v1"), do: BoardStatus.hosted()
-  defp status_bit("board_renamed_v1"), do: 0
+  defp apply_status_bit(status, "board_initiated_v1"),
+    do: :evoq_bit_flags.set(status, BoardStatus.initiated())
+
+  defp apply_status_bit(status, "board_hosted_v1"),
+    do: :evoq_bit_flags.set(status, BoardStatus.hosted())
+
+  defp apply_status_bit(status, "board_archived_v1"),
+    do: :evoq_bit_flags.set(status, BoardStatus.archived())
+
+  defp apply_status_bit(status, "board_unarchived_v1"),
+    do: :evoq_bit_flags.unset(status, BoardStatus.archived())
+
+  defp apply_status_bit(status, "board_renamed_v1"), do: status
 
   # Template-facing view of the accumulator: sorted, and a nil title
   # (a hosted/renamed fact can arrive before the initiated fact that
@@ -287,11 +366,13 @@ defmodule HecateWhiteboardWeb.BoardsLive do
   def remote_boards(remote_board_facts) do
     remote_board_facts
     |> Map.values()
+    |> Enum.reject(&archived?(&1.status))
     |> Enum.map(fn board -> Map.update!(board, :title, &(&1 || board.board_id)) end)
     |> Enum.sort_by(& &1.title)
   end
 
   def hosted?(status), do: :evoq_bit_flags.has(status, BoardStatus.hosted())
+  def archived?(status), do: :evoq_bit_flags.has(status, BoardStatus.archived())
 
   def presence_label(1), do: "1 here"
   def presence_label(n), do: "#{n} here"

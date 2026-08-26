@@ -1,7 +1,7 @@
 defmodule ProjectBoards.BoardLifecycleMeshSubscriber do
-  # :macula_subscriber callback for the four board-lifecycle facts
+  # :macula_subscriber callback for the five board-lifecycle facts
   # published by any peer (see GuideBoardLifecycle.BoardLifecycleV1ToMesh,
-  # the other half of this pair -- four topic strings, must match).
+  # the other half of this pair -- five topic strings, must match).
   #
   # Deliberately does NOT touch the `boards` ETS table or
   # ProjectBoards.Store -- this is the picker's "on other nodes" section
@@ -18,6 +18,7 @@ defmodule ProjectBoards.BoardLifecycleMeshSubscriber do
     "io.macula/whiteboard-commons/whiteboard/board_initiated_v1",
     "io.macula/whiteboard-commons/whiteboard/board_hosted_v1",
     "io.macula/whiteboard-commons/whiteboard/board_archived_v1",
+    "io.macula/whiteboard-commons/whiteboard/board_unarchived_v1",
     "io.macula/whiteboard-commons/whiteboard/board_renamed_v1"
   ]
 

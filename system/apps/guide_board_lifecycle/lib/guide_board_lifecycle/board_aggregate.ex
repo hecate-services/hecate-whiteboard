@@ -17,6 +17,7 @@ defmodule GuideBoardLifecycle.BoardAggregate do
   alias GuideBoardLifecycle.PlaceText.MaybePlaceText
   alias GuideBoardLifecycle.RemoveShape.MaybeRemoveShape
   alias GuideBoardLifecycle.RenameBoard.MaybeRenameBoard
+  alias GuideBoardLifecycle.UnarchiveBoard.MaybeUnarchiveBoard
 
   @impl true
   def state_module, do: BoardState
@@ -45,6 +46,14 @@ defmodule GuideBoardLifecycle.BoardAggregate do
       :evoq_bit_flags.has_not(status, BoardStatus.initiated()) -> {:error, :not_initiated}
       :evoq_bit_flags.has(status, BoardStatus.archived()) -> {:error, :already_archived}
       true -> MaybeArchiveBoard.handle_from_map(payload)
+    end
+  end
+
+  defp do_execute(:unarchive_board, status, payload) do
+    cond do
+      :evoq_bit_flags.has_not(status, BoardStatus.initiated()) -> {:error, :not_initiated}
+      :evoq_bit_flags.has_not(status, BoardStatus.archived()) -> {:error, :not_archived}
+      true -> MaybeUnarchiveBoard.handle_from_map(payload)
     end
   end
 

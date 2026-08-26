@@ -1,6 +1,7 @@
 defmodule GuideBoardLifecycle.BoardLifecycleV1ToMesh do
   # Republishes every LOCALLY-originated board_initiated_v1/
-  # board_hosted_v1/board_archived_v1/board_renamed_v1 as a mesh fact, so
+  # board_hosted_v1/board_archived_v1/board_unarchived_v1/board_renamed_v1
+  # as a mesh fact, so
   # the board picker (HecateWhiteboardWeb.BoardsLive, "on other nodes")
   # updates live instead of only ever reflecting whatever a one-shot
   # mesh query saw at page load.
@@ -28,6 +29,7 @@ defmodule GuideBoardLifecycle.BoardLifecycleV1ToMesh do
     "board_initiated_v1" => "io.macula/whiteboard-commons/whiteboard/board_initiated_v1",
     "board_hosted_v1" => "io.macula/whiteboard-commons/whiteboard/board_hosted_v1",
     "board_archived_v1" => "io.macula/whiteboard-commons/whiteboard/board_archived_v1",
+    "board_unarchived_v1" => "io.macula/whiteboard-commons/whiteboard/board_unarchived_v1",
     "board_renamed_v1" => "io.macula/whiteboard-commons/whiteboard/board_renamed_v1"
   }
 

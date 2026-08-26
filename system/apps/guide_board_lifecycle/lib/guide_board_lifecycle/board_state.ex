@@ -30,6 +30,10 @@ defmodule GuideBoardLifecycle.BoardState do
     %__MODULE__{state | status: :evoq_bit_flags.set(state.status, BoardStatus.archived())}
   end
 
+  defp do_apply("board_unarchived_v1", state, _event) do
+    %__MODULE__{state | status: :evoq_bit_flags.unset(state.status, BoardStatus.archived())}
+  end
+
   defp do_apply("board_renamed_v1", state, event) do
     %__MODULE__{state | title: field(:title, event)}
   end
