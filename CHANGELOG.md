@@ -255,6 +255,25 @@ Versioning: [SemVer](https://semver.org/).
   keeps the old events forever); only the read-model projection stops
   consuming them.
 
+- Snap-to-grid toggle (bottom-right, next to the zoom indicator, off by
+  default like the camera itself -- local to the tab, never persisted or
+  transmitted). Grid is 28px, matching `.canvas-wrap`'s own visible
+  dot-grid spacing exactly. Applies to sticky/text placement and
+  geometry (rectangle/ellipse/triangle) corners -- both while dragging
+  (the live preview already shows the snapped result, not just the
+  final commit) and at drop. Deliberately does NOT touch the Pen tool:
+  forcing every point of a freehand stroke onto a 28px grid would turn
+  it into a staircase. Moving an existing shape (or a marquee-selected
+  group) snaps too, but by adjusting the DRAG DELTA once against a
+  single reference point rather than snapping every point independently
+  -- verified live: a 168x84 rectangle kept its exact dimensions after a
+  snapped move, and a marquee group stays exactly as spaced as it
+  started, just aligned to the grid as a whole. First of three
+  requested Event Storming features (frame/grouping-container and
+  shape-attached arrows are next -- both depend on the two architecture
+  calls made alongside this: live spatial-query containment, and
+  live-reference arrow attachment).
+
 ### Changed
 
 - Escape now switches to the Select tool whenever the active tool isn't

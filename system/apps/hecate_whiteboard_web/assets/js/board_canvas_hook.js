@@ -154,6 +154,11 @@ const MIN_GEOMETRY_SIZE_PX = 4;
 // happened.
 const PASTE_OFFSET_PX = 24;
 
+// Matches .canvas-wrap's own dot-grid background-size exactly -- when
+// snap is on, shapes land ON the visible dots, not at some unrelated
+// spacing the user has to take on faith.
+const SNAP_GRID_PX = 28;
+
 // Distinct per-tool cursors -- a user reported switching tools gave no
 // visible feedback at all, and they were right: every non-select tool
 // fell back to the same bare "crosshair". Sticky does NOT share "text"
@@ -204,6 +209,7 @@ export const BoardCanvas = {
     this.cursorsLayer = this.el.querySelector("#board-canvas-cursors");
     this.emptyState = document.getElementById("board-empty-state");
     this.zoomIndicator = document.getElementById("board-zoom-indicator");
+    this.snapToggle = document.getElementById("board-snap-toggle");
     this.canDraw = this.el.dataset.canDraw === "true";
 
     // Screen = world * zoom + {x, y}. Local to this tab, never persisted
@@ -211,6 +217,10 @@ export const BoardCanvas = {
     // infinite-canvas tool's default. See this file's own header for why
     // NOT resetting it silently loses nothing on old boards.
     this.camera = { x: 0, y: 0, zoom: 1 };
+
+    // Off by default, same as the camera above: local to this tab,
+    // never persisted or transmitted, resets on every mount.
+    this.snapToGrid = false;
 
     this.activeTool = "pen"; // "pen" | "text" | "select" | "sticky" | "rectangle" | "ellipse" | "triangle"
     this.color = "#f2efe6";
@@ -242,6 +252,7 @@ export const BoardCanvas = {
     this.wireCursorTracking();
     this.wireKeyboardShortcuts();
     this.wireCameraControls();
+    this.wireSnapToggle();
 
     this.handleEvent("shapes:snapshot", ({ shapes }) => {
       shapes.forEach((s) => this.renderShape(s));
@@ -440,6 +451,15 @@ export const BoardCanvas = {
     }
   },
 
+  wireSnapToggle() {
+    if (!this.snapToggle) return;
+
+    this.snapToggle.addEventListener("click", () => {
+      this.snapToGrid = !this.snapToGrid;
+      this.snapToggle.classList.toggle("snap-toggle-active", this.snapToGrid);
+    });
+  },
+
   // Cursor markers deliberately do NOT live inside the zoom-scaled
   // shapes-layer transform -- a peer's dot/label should stay a constant
   // SCREEN size as you zoom, like a map pin, not grow or shrink with
@@ -549,12 +569,12 @@ export const BoardCanvas = {
       // dispatch, every time, with no visible trace.
       e.preventDefault();
       this.hideGhost();
-      this.placeShapeInline(this.activeTool, p);
+      this.placeShapeInline(this.activeTool, this.snapPoint(p));
       return;
     }
 
     if (GEOMETRY_KINDS.includes(this.activeTool)) {
-      this.drawingGeometry = { kind: this.activeTool, start: p };
+      this.drawingGeometry = { kind: this.activeTool, start: this.snapPoint(p) };
       return;
     }
 
@@ -588,7 +608,7 @@ export const BoardCanvas = {
     }
 
     if (this.drawingGeometry) {
-      const p = this.point(e);
+      const p = this.snapPoint(this.point(e));
       this.withCamera(this.pending, (ctx) => {
         drawShape(ctx, { kind: this.drawingGeometry.kind, points: [this.drawingGeometry.start, p], color: this.color });
       });
@@ -603,9 +623,10 @@ export const BoardCanvas = {
 
     // Live placement preview -- a ghost of the sticky-to-be, following
     // the pointer so its size/color is never a surprise. See CSS
-    // .shape-ghost's own comment for why it's purely decorative.
+    // .shape-ghost's own comment for why it's purely decorative. Snapped
+    // too, so the preview never lies about where a click will land.
     if (this.activeTool === "sticky") {
-      this.updateGhost(this.point(e));
+      this.updateGhost(this.snapPoint(this.point(e)));
     }
   },
 
@@ -622,7 +643,7 @@ export const BoardCanvas = {
     }
 
     if (this.drawingGeometry) {
-      const p = this.point(e);
+      const p = this.snapPoint(this.point(e));
       this.clearCanvas(this.pending);
 
       const { kind, start } = this.drawingGeometry;
@@ -855,6 +876,33 @@ export const BoardCanvas = {
   point(e) {
     const rect = this.pending.getBoundingClientRect();
     return this.toWorld({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+  },
+
+  // Snaps a single WORLD point to the nearest grid intersection -- used
+  // for fresh placement (sticky/text/geometry corners), where there's no
+  // existing shape geometry to preserve. Never snaps a freehand Pen
+  // stroke: that goes through point(e) directly, not this, since forcing
+  // every point of a freehand curve onto a 28px grid would turn it into
+  // a staircase.
+  snapPoint(point) {
+    if (!this.snapToGrid) return point;
+    return {
+      x: Math.round(point.x / SNAP_GRID_PX) * SNAP_GRID_PX,
+      y: Math.round(point.y / SNAP_GRID_PX) * SNAP_GRID_PX,
+    };
+  },
+
+  // Adjusts a raw drag delta so referencePoint + delta lands exactly on
+  // a grid intersection, then hands back that SAME adjusted delta for
+  // every point in the moving selection. Snapping the delta once here,
+  // rather than snapping each point independently after the fact, is
+  // what keeps a multi-point shape's own internal spacing (a stroke's
+  // curve, a rectangle's aspect ratio) from visibly distorting when snap
+  // is on -- every point moves by the identical adjusted amount.
+  snapDelta(dx, dy, referencePoint) {
+    if (!this.snapToGrid) return { dx, dy };
+    const snapped = this.snapPoint({ x: referencePoint.x + dx, y: referencePoint.y + dy });
+    return { dx: snapped.x - referencePoint.x, dy: snapped.y - referencePoint.y };
   },
 
   // Shared placement flow for sticky/text: a local, not-yet-confirmed
@@ -1098,9 +1146,19 @@ export const BoardCanvas = {
       });
     };
 
+    // Snapping the DELTA (once, against a single reference point) rather
+    // than snapping every item's points independently afterward is what
+    // keeps the whole selection's own internal layout intact -- a
+    // multi-shape marquee-move stays exactly as spaced as it started,
+    // just aligned to the grid as a group; snapping per-point instead
+    // would let each shape drift to its OWN nearest grid line and pull
+    // the group apart.
+    const referencePoint = items[0].originalPoints[0];
+
     const onMove = (moveEvent) => {
       const p = this.point(moveEvent);
-      applyDelta(p.x - startPoint.x, p.y - startPoint.y);
+      const { dx, dy } = this.snapDelta(p.x - startPoint.x, p.y - startPoint.y, referencePoint);
+      applyDelta(dx, dy);
     };
 
     const cleanupListeners = () => {

@@ -365,6 +365,43 @@ a.brand:hover {
   color: var(--chalk);
 }
 
+/* Same floating-control family as .zoom-indicator (a canvas-viewport
+   toggle, not a tool or a color, so it doesn't belong in the side-pane
+   sections), positioned just to its left. Active state reuses
+   .tool-row-active's own amber convention. */
+.snap-toggle {
+  position: absolute;
+  right: 4.75rem;
+  bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid var(--slate-line);
+  background: var(--slate-deep);
+  color: var(--chalk-dim);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.snap-toggle:hover {
+  border-color: var(--amber);
+  color: var(--chalk);
+}
+
+.snap-toggle-active {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: var(--slate-deep);
+}
+
+.snap-toggle-active:hover {
+  color: var(--slate-deep);
+}
+
 .empty-state {
   position: absolute;
   inset: 0;
