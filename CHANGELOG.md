@@ -255,6 +255,31 @@ Versioning: [SemVer](https://semver.org/).
   keeps the old events forever); only the read-model projection stops
   consuming them.
 
+### Changed
+
+- Escape now switches to the Select tool whenever the active tool isn't
+  already Select, on top of cancelling whatever's active -- a single
+  universal rule replacing the previous "stay armed" design (kept
+  originally for rapid multi-sticky placement, matching a stated-but-
+  only-partially-true "Figma/Excalidraw convention": both actually DO
+  return to their move/select tool on Escape once nothing is mid-drag).
+  Asked directly why not just switch tools; the rapid-placement
+  reasoning didn't hold up against how stickies actually get placed in
+  bulk here (select one, copy, paste N times -- not re-arming the
+  sticky tool per note). `cancelGesture` simplifies as a result: the
+  dedicated ghost-preview branch from the fix above is gone, since
+  `setTool` already calls `hideGhost()` for any non-sticky tool, so
+  switching to Select clears a still-armed sticky's ghost for free.
+  `moving`/`marquee` cancel is unaffected (both only ever happen with
+  Select already active, so the tool-switch is a no-op there, and
+  critically DOESN'T re-clear the just-restored selection --
+  `setTool` unconditionally clears selection, which would otherwise
+  turn "cancel a drag" into "cancel a drag AND deselect"). Verified
+  live: a mid-drag cancel still leaves the group selected (dashed
+  outline, position reverted) with Select untouched; a mid-stroke Pen
+  cancel and a dismissed sticky ghost both now land in Select instead
+  of staying armed.
+
 ### Fixed
 
 - `QueryBoards.ListBoardsOverMesh`'s remote-board discovery, called once

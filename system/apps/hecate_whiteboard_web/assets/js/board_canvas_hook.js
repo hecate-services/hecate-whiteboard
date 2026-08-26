@@ -724,56 +724,50 @@ export const BoardCanvas = {
 
   // First aborts whatever's actively being drawn or dragged, WITHOUT
   // committing anything to the server -- the canvas/shape(s) end up
-  // exactly where they were before the gesture started. The active
-  // tool itself is untouched (matches Figma/Excalidraw convention:
-  // Escape cancels the current gesture, not the tool you're in). If
-  // nothing is actively in progress but something IS selected (the
-  // common case: click a shape, then Escape with no drag at all),
-  // clears the selection instead -- the gap a live user report caught:
-  // the four gesture checks below all require this.drawing/
-  // drawingGeometry/moving/marquee to be truthy, so a static selection
-  // sitting idle made every one of them a no-op.
+  // exactly where they were before the gesture started. THEN, if the
+  // active tool isn't Select, switches to it -- Escape is "get me out
+  // of here," a single universal rule, not a per-tool special case.
+  //
+  // This used to keep the active tool armed (matching a stated-but-only-
+  // partially-true "Figma/Excalidraw convention": both actually DO
+  // return to their move/select tool on Escape once nothing is
+  // mid-drag, e.g. a shape tool armed but not yet clicked). Kept
+  // "stay armed" originally for rapid multi-sticky placement (Event
+  // Storming: place Event, Command, Actor, ... back to back), but that
+  // reasoning didn't hold up: asked, and the real workflow for that is
+  // select-one-copy-paste-N-times, not re-arming the tool per note. The
+  // switch-to-select step ALSO retires the ghost-preview special case
+  // this function used to need: setTool already calls hideGhost() for
+  // any non-sticky tool, so a still-armed sticky's ghost disappears for
+  // free as a side effect of switching tools, no separate branch needed.
+  //
+  // moving/marquee only ever happen with Select already active, so the
+  // final switch-to-select is a no-op for them (skipped entirely,
+  // activeTool is already "select") -- important, since setTool ALSO
+  // unconditionally clears the selection, and cancelling a drag should
+  // leave the group selected, not deselect it. The static-selection
+  // branch below is for the same reason: activeTool is already "select"
+  // there too, so it needs its own explicit clearSelection -- the gap a
+  // live user report originally caught (click a shape, Escape with no
+  // drag at all: none of the checks below were true, so Escape was a
+  // silent no-op).
   cancelGesture() {
     if (this.drawing) {
       this.drawing = false;
       this.points = [];
       this.clearCanvas(this.pending);
-      return;
-    }
-
-    if (this.drawingGeometry) {
+    } else if (this.drawingGeometry) {
       this.drawingGeometry = null;
       this.clearCanvas(this.pending);
-      return;
-    }
-
-    if (this.moving) {
+    } else if (this.moving) {
       this.moving.cancel();
-      return;
-    }
-
-    if (this.marquee) {
+    } else if (this.marquee) {
       this.marquee.cancel();
-      return;
-    }
-
-    // The sticky tool's own live placement preview (see updateGhost) is
-    // a continuous hover state, not a one-shot gesture like the four
-    // above -- none of them ever touch it, so with the sticky tool armed
-    // and no drag/selection in progress, Escape was a silent no-op here
-    // too. Reported live ("ESC still doesnt work (sticky note drag view
-    // remains visible)"). Hiding it is a momentary cancel, same spirit
-    // as the others: the tool stays armed, so the ghost naturally
-    // resumes on the next pointer move -- Escape dismisses THIS preview,
-    // it doesn't disarm the tool.
-    if (this.ghostEl) {
-      this.hideGhost();
-      return;
-    }
-
-    if (this.selection.size > 0) {
+    } else if (this.selection.size > 0) {
       this.clearSelection();
     }
+
+    if (this.activeTool !== "select") this.setTool("select");
   },
 
   // Snapshots the WHOLE selection, not just one shape -- clipboard is
