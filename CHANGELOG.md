@@ -280,6 +280,14 @@ Versioning: [SemVer](https://semver.org/).
   cancel and a dismissed sticky ghost both now land in Select instead
   of staying armed.
 
+- Toolbox order: Select moved to the top, above Pen. Asked directly
+  ("shouldn't the Select tool be at the top?") -- matches Figma/
+  Excalidraw's own toolbar convention (the pointer tool leads), and
+  lines up with Select's growing role as the tool Escape always lands
+  you back in (see the entry above). Pen stays the default active tool
+  on a fresh board load; only the listed order changed, not which tool
+  starts armed.
+
 ### Fixed
 
 - Repeated Ctrl/Cmd+V stacked every paste on top of the SAME spot
