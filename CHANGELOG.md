@@ -355,6 +355,31 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- Toolbox clicks (tools, ink swatches, sticky-color swatches) could go
+  silently dead in an already-open tab -- reported live ("it seems i
+  cannot select the frame tool"). Root cause: `wireToolButtons`/
+  `wireInkSwatches`/`wireStickySwatches` attached a `click` listener
+  directly to each `[data-tool]`/`.swatch`/`.sticky-row` button, once,
+  in the canvas hook's `mounted()`. Those buttons live in the side pane,
+  OUTSIDE the hook's own `phx-update="ignore"` region, so they're
+  ordinary LiveView-diffed DOM -- any diff that replaces rather than
+  patches a button node (a toolbox reorder, a brand-new tool like Frame
+  appearing for the first time, a socket reconnecting to newer server
+  code than what the tab's hook was mounted against) leaves the new
+  node with no listener at all, since `mounted()` already ran and never
+  fires again. Reproduced against beam01 directly: the deployed Frame
+  button worked perfectly for a fresh page load, which is what made
+  this one hard to catch by re-testing -- the bug only bites a tab that
+  was already open across the exact toolbox-changing deploy, exactly
+  the kind of long-lived session this project's demo boards actually
+  see. Fixed by delegating all three to a single `click` listener on
+  `document` that resolves the target via `closest(...)` on each event,
+  so wiring no longer depends on which button nodes existed at mount
+  time. Since `BoardsLive` reaches a board via `push_navigate` (no full
+  page reload, so `destroyed()`/`mounted()` can cycle repeatedly on one
+  document), the three delegated listeners are also removed in
+  `destroyed()` to avoid stacking a duplicate set on every board visit.
+
 - Repeated Ctrl/Cmd+V stacked every paste on top of the SAME spot
   instead of cascading -- `pasteOne` always read the clipboard's
   original, never-updated points, so every paste offset by the same

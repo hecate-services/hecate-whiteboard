@@ -171,6 +171,12 @@ function distanceToSegment(p, a, b) {
 
 const HIT_THRESHOLD_PX = 10;
 const GEOMETRY_KINDS = ["rectangle", "ellipse", "triangle", "frame"];
+// Same four kinds as GEOMETRY_KINDS -- every one of them is already
+// "two opposite corner points", the exact shape resize needs. A stroke
+// has no single meaningful resize (its points are a whole freehand
+// path, not a box), so it's deliberately excluded by staying outside
+// this list rather than needing its own separate check everywhere.
+const RESIZE_HANDLE_PX = 8;
 // Below this, a click-drag reads as an accidental click, not real intent
 // to draw a zero-size shape -- mirrors how draw_stroke's own single-point
 // "dot" case is the one deliberate exception, not the default.
@@ -511,32 +517,44 @@ export const BoardCanvas = {
     });
   },
 
+  // Delegated on document (not per-button addEventListener) because these
+  // buttons live outside the phx-hook's phx-update="ignore" region -- any
+  // LiveView diff that touches the side-pane (a reorder, a newly-added
+  // tool, a reconnect that re-renders with newer server code than this
+  // tab's already-mounted hook) can replace the DOM nodes, which would
+  // silently orphan a listener attached directly to the old node. A
+  // delegated listener on document only cares that the click bubbles up,
+  // so it survives regardless of how many times the toolbox re-renders.
   wireInkSwatches() {
-    document.querySelectorAll(".swatch").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        document.querySelectorAll(".swatch").forEach((b) => b.classList.remove("swatch-active"));
-        btn.classList.add("swatch-active");
-        this.color = btn.dataset.color;
-        this.setTool("pen");
-      });
-    });
+    this.onSwatchClick = (e) => {
+      const btn = e.target.closest(".swatch");
+      if (!btn) return;
+      document.querySelectorAll(".swatch").forEach((b) => b.classList.remove("swatch-active"));
+      btn.classList.add("swatch-active");
+      this.color = btn.dataset.color;
+      this.setTool("pen");
+    };
+    document.addEventListener("click", this.onSwatchClick);
   },
 
   wireStickySwatches() {
-    document.querySelectorAll(".sticky-row").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        document.querySelectorAll(".sticky-row").forEach((b) => b.classList.remove("sticky-row-active"));
-        btn.classList.add("sticky-row-active");
-        this.stickyColor = btn.dataset.stickyColor;
-        this.setTool("sticky");
-      });
-    });
+    this.onStickyRowClick = (e) => {
+      const btn = e.target.closest(".sticky-row");
+      if (!btn) return;
+      document.querySelectorAll(".sticky-row").forEach((b) => b.classList.remove("sticky-row-active"));
+      btn.classList.add("sticky-row-active");
+      this.stickyColor = btn.dataset.stickyColor;
+      this.setTool("sticky");
+    };
+    document.addEventListener("click", this.onStickyRowClick);
   },
 
   wireToolButtons() {
-    document.querySelectorAll("[data-tool]").forEach((btn) => {
-      btn.addEventListener("click", () => this.setTool(btn.dataset.tool));
-    });
+    this.onToolButtonClick = (e) => {
+      const btn = e.target.closest("[data-tool]");
+      if (btn) this.setTool(btn.dataset.tool);
+    };
+    document.addEventListener("click", this.onToolButtonClick);
   },
 
   wireCollapseToggle() {
@@ -1459,5 +1477,11 @@ export const BoardCanvas = {
 
   destroyed() {
     clearTimeout(this.settleTimer);
+    // push_navigate (boards list -> a board) tears down and remounts this
+    // hook WITHOUT a full page reload, so document-level delegated
+    // listeners must be removed here or they accumulate one set per visit.
+    document.removeEventListener("click", this.onSwatchClick);
+    document.removeEventListener("click", this.onStickyRowClick);
+    document.removeEventListener("click", this.onToolButtonClick);
   },
 };
