@@ -257,6 +257,21 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- Escape still did nothing for one more case beyond the earlier fix: the
+  sticky tool's own live placement preview (a colored ghost box that
+  follows the pointer while the tool is armed, before anything is
+  placed) -- reported live ("ESC still doesnt work (sticky note drag
+  view remains visible)"). None of `cancelGesture`'s four gesture checks
+  (`drawing`/`drawingGeometry`/`moving`/`marquee`) cover it, since it's a
+  continuous hover state rather than a one-shot gesture, so with the
+  sticky tool armed and nothing actively being dragged, Escape was a
+  silent no-op here too -- the same shape of gap as the original fix,
+  just a different piece of state. `cancelGesture` now hides the ghost
+  as another fallback. The tool stays armed (matches this fix's own
+  established "Escape cancels the current thing, not the tool"
+  convention): the ghost naturally reappears on the next pointer move,
+  same as before Escape was pressed.
+
 - Every pre-existing board (including "Demo Video Board", reported live
   as "empty") came up with no shapes after the `shape_initiated_v1`/
   `shape_amended_v1` consolidation deployed above -- exactly its own

@@ -757,6 +757,20 @@ export const BoardCanvas = {
       return;
     }
 
+    // The sticky tool's own live placement preview (see updateGhost) is
+    // a continuous hover state, not a one-shot gesture like the four
+    // above -- none of them ever touch it, so with the sticky tool armed
+    // and no drag/selection in progress, Escape was a silent no-op here
+    // too. Reported live ("ESC still doesnt work (sticky note drag view
+    // remains visible)"). Hiding it is a momentary cancel, same spirit
+    // as the others: the tool stays armed, so the ghost naturally
+    // resumes on the next pointer move -- Escape dismisses THIS preview,
+    // it doesn't disarm the tool.
+    if (this.ghostEl) {
+      this.hideGhost();
+      return;
+    }
+
     if (this.selection.size > 0) {
       this.clearSelection();
     }
