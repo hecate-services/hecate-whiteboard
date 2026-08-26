@@ -97,6 +97,30 @@ function drawTriangle(ctx, shape) {
   ctx.restore();
 }
 
+// Deliberately NOT drawn in the caller's ink color (unlike rectangle/
+// ellipse/triangle) -- a frame is structural background, not content,
+// so it stays a fixed neutral regardless of which ink swatch happens to
+// be selected. Dashed, so it reads as "container" rather than "shape"
+// at a glance even before you notice anything's inside it. The label is
+// fixed text for now, not user-editable -- renaming is a natural
+// follow-on (matching the board-title click-to-rename affordance), not
+// in this first cut.
+function drawFrame(ctx, shape) {
+  const { x, y, w, h } = geometryBox(shape.points);
+  ctx.save();
+  ctx.strokeStyle = "rgba(242, 239, 230, 0.35)";
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 4]);
+  ctx.strokeRect(x, y, w, h);
+  ctx.setLineDash([]);
+  ctx.fillStyle = "rgba(242, 239, 230, 0.55)";
+  // Canvas ctx.font needs a resolved font stack, not a CSS var()
+  // reference -- kept in sync with app.css's own --mono by hand.
+  ctx.font = '12px ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace';
+  ctx.fillText(shape.text || "Frame", x + 6, y - 8 < 0 ? y + 14 : y - 8);
+  ctx.restore();
+}
+
 // Single dispatch point for every canvas-rendered shape kind -- used by
 // the confirmed-shape layer, the live drag-to-size preview, and the
 // live selected-shape-move preview, so all three always agree on what
@@ -109,6 +133,8 @@ function drawShape(ctx, shape) {
       return drawEllipse(ctx, shape);
     case "triangle":
       return drawTriangle(ctx, shape);
+    case "frame":
+      return drawFrame(ctx, shape);
     default:
       return drawStroke(ctx, shape);
   }
@@ -144,7 +170,7 @@ function distanceToSegment(p, a, b) {
 }
 
 const HIT_THRESHOLD_PX = 10;
-const GEOMETRY_KINDS = ["rectangle", "ellipse", "triangle"];
+const GEOMETRY_KINDS = ["rectangle", "ellipse", "triangle", "frame"];
 // Below this, a click-drag reads as an accidental click, not real intent
 // to draw a zero-size shape -- mirrors how draw_stroke's own single-point
 // "dot" case is the one deliberate exception, not the default.
@@ -177,6 +203,7 @@ const CURSOR_BY_TOOL = {
   rectangle: "crosshair",
   ellipse: "crosshair",
   triangle: "crosshair",
+  frame: "crosshair",
 };
 
 // How long a peer's pointer must sit still before this browser tells the
@@ -348,9 +375,19 @@ export const BoardCanvas = {
     ctx.restore();
   },
 
+  // Frames always paint FIRST regardless of where they fall in
+  // this.shapes' own creation-order array -- a frame drawn AFTER some
+  // shapes already exist inside it (or one a shape gets drawn into
+  // later) must still sit visually BEHIND them, since it's a background
+  // container, not content. this.shapes' own order is untouched (only
+  // the draw pass reorders), since plenty of other code (hit-testing,
+  // shape lookup by id) relies on it meaning "creation order".
   redrawCommitted() {
     this.withCamera(this.committed, (ctx) => {
-      this.shapes.forEach((s) => drawShape(ctx, s));
+      const frames = this.shapes.filter((s) => s.kind === "frame");
+      const rest = this.shapes.filter((s) => s.kind !== "frame");
+      frames.forEach((s) => drawShape(ctx, s));
+      rest.forEach((s) => drawShape(ctx, s));
     });
   },
 
@@ -588,7 +625,26 @@ export const BoardCanvas = {
         // -- same convention as onShapeDown's own DOM-shape handling
         // (they share beginMove for exactly this reason).
         if (!this.selection.has(hit.shape_id)) {
-          this.setSelection(new Map([[hit.shape_id, "canvas"]]));
+          const next = new Map([[hit.shape_id, "canvas"]]);
+
+          // Clicking a FRAME also grabs everything currently sitting
+          // inside its bounds, computed once here (not kept live for
+          // the rest of the drag -- membership shouldn't flicker as the
+          // frame passes over other shapes mid-move). Reuses
+          // shapesWithinRect verbatim, the exact same live-spatial-query
+          // containment marquee-select already does -- a frame's
+          // "what's inside me" question and a marquee's "what did I just
+          // rubber-band" question are the same question. Beyond this,
+          // beginMove needs no frame-specific code at all: it already
+          // moves whatever's in this.selection together, so a frame's
+          // contents just ride along as ordinary selected items.
+          if (hit.kind === "frame") {
+            this.shapesWithinRect(boundingBox(hit.points)).forEach((kind, shapeId) => {
+              if (shapeId !== hit.shape_id) next.set(shapeId, kind);
+            });
+          }
+
+          this.setSelection(next);
         }
         this.beginMove(p);
       } else {
@@ -962,10 +1018,21 @@ export const BoardCanvas = {
   // effective SCREEN-pixel tolerance constant across zoom levels.
   hitTestCanvasShape(point) {
     const threshold = HIT_THRESHOLD_PX / this.camera.zoom;
-    return this.shapes.find((shape) => {
+    const hits = (shape) => {
       if (shape.kind === "stroke") return this.strokeHit(point, shape, threshold);
       return pointInBoundingBox(point, shape.points, threshold);
-    });
+    };
+
+    // Frames checked LAST -- a frame's own bounding box legitimately
+    // overlaps every shape inside it, and a click on one of those
+    // shapes must always hit THAT shape, never the background frame it
+    // happens to sit inside. Only when nothing else matches does a
+    // click fall through to select the frame itself (e.g. to move the
+    // whole group, or to click genuinely empty space inside it).
+    return (
+      this.shapes.find((shape) => shape.kind !== "frame" && hits(shape)) ||
+      this.shapes.find((shape) => shape.kind === "frame" && hits(shape))
+    );
   },
 
   strokeHit(point, stroke, threshold) {

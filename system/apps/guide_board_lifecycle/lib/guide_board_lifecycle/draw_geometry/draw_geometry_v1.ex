@@ -1,16 +1,20 @@
 defmodule GuideBoardLifecycle.DrawGeometry.DrawGeometryV1 do
   # Command: draw_geometry_v1 -- adds one basic shape (rectangle, ellipse,
-  # or triangle) to a hosted board. `points` is always the two opposite
-  # corners of the shape's bounding box (client-computed from a
+  # triangle, or frame) to a hosted board. `points` is always the two
+  # opposite corners of the shape's bounding box (client-computed from a
   # click-drag gesture, same convention every other drawing tool uses
   # for these three) -- the renderer derives the actual outline from
   # `kind` + those two points, so no shape-specific geometry needs to
   # travel over the wire. Outlined in the caller's ink color, not
   # filled -- reuses the Pen tool's palette rather than adding a second
-  # color picker just for these three.
+  # color picker just for these three. `frame` (a grouping container --
+  # any shape whose position falls within its bounds counts as
+  # contained, computed live client-side, nothing stored server-side)
+  # rides the exact same command/event -- it's still just a kind with
+  # two corner points, the server has no notion of "container" at all.
   @behaviour :evoq_command
 
-  @kinds ~w(rectangle ellipse triangle)
+  @kinds ~w(rectangle ellipse triangle frame)
 
   defstruct [:board_id, :shape_id, :kind, :points, :color]
 

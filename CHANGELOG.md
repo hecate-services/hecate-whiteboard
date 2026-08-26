@@ -274,6 +274,52 @@ Versioning: [SemVer](https://semver.org/).
   calls made alongside this: live spatial-query containment, and
   live-reference arrow attachment).
 
+- Frame tool -- second of three requested Event Storming features, and
+  what a swim lane turns out to be: not its own bespoke shape kind, but
+  a generic grouping container used flexibly (a full-height frame is a
+  vertical lane, a full-width one horizontal, no separate lane
+  implementation needed at all). Backend needed exactly one line: added
+  to `draw_geometry_v1`'s existing kind allowlist -- `frame` is still
+  just a kind plus two corner points to the server, which has no notion
+  of "container" whatsoever; every bit of grouping logic lives
+  client-side. Click-drag to size, like rectangle/ellipse/triangle (no
+  post-creation resize in this first cut, matching how those three
+  already work); renders dashed, in a fixed neutral color rather than
+  the ink palette, with a fixed "Frame" label (not yet user-editable --
+  renaming is a natural follow-on, matching the board-title
+  click-to-rename affordance).
+
+  Containment is the live spatial query settled on earlier: reuses
+  `shapesWithinRect` verbatim -- the exact same check marquee-select
+  already does, since "what's inside this frame" and "what did a
+  marquee just rubber-band" are the same question. Computed once, at
+  the start of a frame drag, not kept live for the rest of it --
+  membership doesn't flicker as the frame passes over other shapes
+  mid-move. Beyond that one computation, `beginMove` needed no
+  frame-specific code: a frame's contents just ride along as ordinary
+  selected items, which also means deleting or copying a
+  frame-plus-contents selection already works, for free, through the
+  existing group-selection mechanics.
+
+  Two more fixes needed alongside the frame itself, for shapes to
+  correctly coexist with a container around them:
+  - `redrawCommitted` now always paints every frame FIRST regardless of
+    creation order, so a frame drawn after shapes already exist inside
+    it (or a shape drawn into one later) still sits visually behind
+    them -- a container, not content.
+  - `hitTestCanvasShape` now checks every non-frame shape before any
+    frame -- a frame's own bounding box legitimately overlaps
+    everything inside it, so without this, clicking a shape inside a
+    frame would incorrectly hit the frame instead.
+
+  Verified live: a sticky and a rectangle both render on top of a
+  frame drawn behind them; dragging the frame from empty space inside
+  it moves the frame and everything within its bounds together, with
+  each shape's own position relative to the others preserved exactly
+  (confirmed both shapes' dispatched points shifted by the identical
+  delta); clicking directly on a shape inside a frame selects that
+  shape alone, not the frame.
+
 ### Changed
 
 - Escape now switches to the Select tool whenever the active tool isn't
